@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema integrado de métodos numéricos de estimación: Bisección, Punto Fijo, Newton-Raphson, Aitken y Lagrange.">
+  <title>Métodos de Estimación | Sistema Integrado</title>
+  <link rel="stylesheet" href="styles.css?v=5">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">∑</div>
+        <div>
+          <h1>NúmeriCalc</h1>
+          <div class="brand-sub">Métodos de Estimación</div>
+        </div>
+      </div>
+
+      <div class="sidebar-section-title">Métodos disponibles</div>
+      <ul class="method-list" id="method-list">
+        <!-- Populated by JS -->
+      </ul>
+
+      <div class="sidebar-info">
+        <p><strong>📝 Guía de sintaxis</strong></p>
+        <p style="margin-top:8px">Operadores: <span class="info-highlight">+  -  *  /  ^</span></p>
+        <p style="margin-top:8px">Funciones disponibles:</p>
+        <p><span class="info-highlight">sqrt(x)</span> — raíz cuadrada</p>
+        <p><span class="info-highlight">sin(x) cos(x) tan(x)</span></p>
+        <p><span class="info-highlight">abs(x)</span> — valor absoluto</p>
+        <p><span class="info-highlight">exp(x)</span> — e elevado a x</p>
+        <p style="margin-top:6px"><span class="info-highlight">log(x)</span> o <span class="info-highlight">ln(x)</span> — logaritmo natural (base e)</p>
+        <p><span class="info-highlight">log10(x)</span> — logaritmo base 10</p>
+        <p style="margin-top:8px">Constantes: <span class="info-highlight">pi</span> = 3.14159...  <span class="info-highlight">e</span> = 2.71828...</p>
+        <p style="margin-top:8px"><strong>Ejemplos:</strong></p>
+        <p><span class="info-highlight">x^3 - 2*x + 1</span></p>
+        <p><span class="info-highlight">sqrt(x + 2)</span></p>
+        <p><span class="info-highlight">log(x) - x + 3</span></p>
+      </div>
+    </aside>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="main-content">
+
+      <!-- Page Header -->
+      <div class="page-header">
+        <h2><span class="header-gradient" id="method-title">Bisección</span></h2>
+        <p id="method-desc">Encuentra raíces dividiendo intervalos sucesivamente.</p>
+      </div>
+
+      <!-- Input Card -->
+      <div class="glass-card">
+        <div class="card-title">
+          <span class="title-icon">⚙️</span>
+          Parámetros del Método
+        </div>
+
+        <div id="form-fields">
+          <!-- Dynamic form rendered by JS -->
+        </div>
+
+        <button class="btn-primary" onclick="ejecutar()" id="btn-ejecutar">
+          ▶ Ejecutar Método
+        </button>
+      </div>
+
+      <!-- Results Section -->
+      <div class="results-section" id="results-section">
+
+        <!-- Status -->
+        <div class="status-badge success" id="result-status">
+          ✅ Convergencia exitosa
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="glass-card">
+          <div class="card-title">
+            <span class="title-icon">📊</span>
+            Resumen de Resultados
+          </div>
+          <div class="summary-grid" id="summary-grid"></div>
+        </div>
+
+        <!-- Chart -->
+        <div class="glass-card">
+          <div class="card-title">
+            <span class="title-icon">📈</span>
+            Gráfico
+          </div>
+          <div class="chart-container" id="chart-container">
+            <canvas id="chart-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Iteration Table -->
+        <div class="glass-card">
+          <div class="card-title">
+            <span class="title-icon">📋</span>
+            Historial de Iteraciones
+          </div>
+          <div class="table-wrapper" id="table-wrapper"></div>
+        </div>
+
+      </div>
+
+    </main>
+  </div>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>
