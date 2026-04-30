@@ -1667,33 +1667,10 @@ const METHODS = {
     ],
     run: (v) => compararEDO(v.f_expr, parseFloat(v.y0), parseFloat(v.t0), parseFloat(v.tf), parseFloat(v.h))
   },
-  df_tabla: {
-    name: 'Dif. Finitas — Tabla de puntos',
-    description: "Calcula f'(x) y f''(x) en una lista de puntos con diferencias centrales.",
-    fields: [
-      { id: 'f_expr', label: 'Función f(x)', placeholder: 'sin(x)', hint: 'Usa x como variable', fullWidth: true },
-      { id: 'x_lista', label: 'Puntos x (separados por coma)', placeholder: '0, 0.1, 0.2, 0.3, 0.4, 0.5', hint: 'Ej: 0, 0.1, 0.2, 0.3', fullWidth: true },
-      { id: 'h', label: 'Paso h', placeholder: '0.1', type: 'number' },
-    ],
-    run: (v) => {
-      const xPuntos = v.x_lista.split(',').map(s => parseMathVal(s.trim())).filter(x => !isNaN(x));
-      return difFinitasTabla(v.f_expr, xPuntos, parseFloat(v.h));
-    }
-  },
-  df_comparar: {
-    name: 'Dif. Finitas — Comparar fórmulas',
-    description: "Compara adelante, atrás y central (orden 1 y 2) en un punto x₀.",
-    fields: [
-      { id: 'f_expr', label: 'Función f(x)', placeholder: 'exp(-2*x) - x', hint: 'Usa x como variable', fullWidth: true },
-      { id: 'x0', label: 'Punto x₀', placeholder: '2', type: 'number' },
-      { id: 'h', label: 'Paso h', placeholder: '0.01', type: 'number' },
-    ],
-    run: (v) => difFinitasComparar(v.f_expr, parseFloat(v.x0), parseFloat(v.h))
-  },
-  df_datos: {
-    name: 'Dif. Finitas — Datos (v y a)',
-    description: 'Calcula velocidad y aceleración a partir de datos posición-tiempo.',
-    isDFDatos: true,
+  diferencias_finitas: {
+    name: 'Diferencias Finitas',
+    description: 'Derivadas numéricas: tabla de puntos, comparación de fórmulas, datos discretos y tablas x,y.',
+    isDifFinitasUnified: true,
     fields: [],
     run: null
   }
@@ -1733,9 +1710,7 @@ function renderSidebar() {
     heun: '📏',
     runge_kutta: '🔬',
     comparar_edo: '⚖️',
-    df_tabla: '∂',
-    df_comparar: '≈',
-    df_datos: '🚗'
+    diferencias_finitas: '∂'
   };
   const subtitles = {
     biseccion: 'Búsqueda de raíces',
@@ -1753,9 +1728,7 @@ function renderSidebar() {
     heun: 'EDO — Euler mejorado',
     runge_kutta: 'EDO — RK4 + campo director',
     comparar_edo: 'EDO — Comparación de métodos',
-    df_tabla: "f'(x) y f''(x) en múltiples puntos",
-    df_comparar: 'Adelante / Atrás / Central',
-    df_datos: 'Velocidad y aceleración'
+    diferencias_finitas: 'Derivadas numéricas'
   };
 
   const list = $('#method-list');
@@ -1811,6 +1784,11 @@ function renderForm(key, method) {
 
   if (method.isDFDatos) {
     renderDFDatosForm(formContainer);
+    return;
+  }
+
+  if (method.isDifFinitasUnified) {
+    renderDifFinitasForm(formContainer);
     return;
   }
 
@@ -2021,6 +1999,252 @@ function renderDFDatosForm(container) {
   container.appendChild(header);
 }
 
+// Módulo 4: Tabla x,y discreta → f' y f'' con diferencias finitas
+function difFinitasDatosXY(xDatos, yDatos, xEval) {
+  const n = xDatos.length;
+  if (n < 3) return { error: true, message: 'Se necesitan al menos 3 puntos.' };
+  if (n !== yDatos.length) return { error: true, message: 'La cantidad de x e y no coincide.' };
+
+  const historial = xDatos.map((x, i) => {
+    let f1, f2, f1tipo;
+    if (i === 0) {
+      f1 = (yDatos[1] - yDatos[0]) / (xDatos[1] - xDatos[0]);
+      f2 = null; f1tipo = 'adelante';
+    } else if (i === n - 1) {
+      f1 = (yDatos[i] - yDatos[i-1]) / (xDatos[i] - xDatos[i-1]);
+      f2 = null; f1tipo = 'atrás';
+    } else {
+      const hb = (xDatos[i+1] - xDatos[i-1]) / 2;
+      f1 = (yDatos[i+1] - yDatos[i-1]) / (xDatos[i+1] - xDatos[i-1]);
+      f2 = (yDatos[i+1] - 2*yDatos[i] + yDatos[i-1]) / (hb * hb);
+      f1tipo = 'central';
+    }
+    return { x, y: yDatos[i], f1, f2, f1tipo };
+  });
+
+  // Evaluar f'(xEval) por interpolación si xEval no está en la tabla
+  let evalResult = null;
+  if (xEval !== null && xEval !== undefined && !isNaN(xEval)) {
+    // Encontrar los dos puntos más cercanos
+    const idx = xDatos.reduce((best, x, i) =>
+      Math.abs(x - xEval) < Math.abs(xDatos[best] - xEval) ? i : best, 0);
+    const i = Math.min(Math.max(idx, 1), n - 2);
+    const hb = (xDatos[i+1] - xDatos[i-1]) / 2;
+    const f1Eval = (yDatos[i+1] - yDatos[i-1]) / (xDatos[i+1] - xDatos[i-1]);
+    const f2Eval = (yDatos[i+1] - 2*yDatos[i] + yDatos[i-1]) / (hb * hb);
+    evalResult = { x: xEval, f1: f1Eval, f2: f2Eval, vecinos: [xDatos[i-1], xDatos[i], xDatos[i+1]] };
+  }
+
+  const graphY  = xDatos.map((x, i) => ({ x, y: yDatos[i] }));
+  const graphF1 = historial.filter(r => r.f1 !== null).map(r => ({ x: r.x, y: r.f1 }));
+
+  return {
+    convergio: true, isDifFinitas: true, modoDifFinitas: 'xy',
+    historial, evalResult, graphY, graphF1,
+    columns: ['x', 'y', "f'(x)", "f''(x)", 'Tipo'],
+    getRow: (r) => [fmt(r.x), fmt(r.y), fmt(r.f1), r.f2 !== null ? fmt(r.f2) : '—', r.f1tipo]
+  };
+}
+
+// Estado del form unificado de diferencias finitas
+let dfMode = 'tabla';
+let dfXYRows = [
+  { x: '0', y: '2' }, { x: '1', y: '6' }, { x: '2', y: '' },
+  { x: '3', y: '12' }, { x: '4', y: '16' }
+];
+
+function renderDifFinitasForm(container) {
+  container.innerHTML = '';
+
+  // Selector de modo
+  const modeGroup = document.createElement('div');
+  modeGroup.className = 'form-group full-width';
+  modeGroup.innerHTML = `
+    <label for="df-mode-select">Modo de Diferencias Finitas</label>
+    <select id="df-mode-select" class="form-select">
+      <option value="tabla"   ${dfMode==='tabla'   ?'selected':''}>Tabla de puntos — f'(x) y f''(x) en múltiples x</option>
+      <option value="comparar"${dfMode==='comparar'?'selected':''}>Comparar fórmulas — adelante, atrás y central</option>
+      <option value="datos"   ${dfMode==='datos'   ?'selected':''}>Datos posición-tiempo — velocidad y aceleración</option>
+      <option value="xy"      ${dfMode==='xy'      ?'selected':''}>Tabla x,y discreta — f'(x) con datos conocidos</option>
+    </select>
+  `;
+  container.appendChild(modeGroup);
+
+  const dynamicArea = document.createElement('div');
+  dynamicArea.id = 'df-dynamic-fields';
+  container.appendChild(dynamicArea);
+
+  const sel = modeGroup.querySelector('#df-mode-select');
+  sel.addEventListener('change', () => {
+    dfMode = sel.value;
+    renderDFDynamicFields(dynamicArea);
+  });
+
+  renderDFDynamicFields(dynamicArea);
+}
+
+function renderDFDynamicFields(area) {
+  area.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'form-grid';
+
+  if (dfMode === 'tabla') {
+    grid.innerHTML = `
+      <div class="form-group full-width">
+        <label for="df-f-expr">Función f(x)</label>
+        <input type="text" id="df-f-expr" placeholder="sin(x)" value="">
+        <span class="input-hint">Usa x como variable</span>
+      </div>
+      <div class="form-group full-width">
+        <label for="df-x-lista">Puntos x (separados por coma)</label>
+        <input type="text" id="df-x-lista" placeholder="0, 0.1, 0.2, 0.3, 0.4, 0.5">
+      </div>
+      <div class="form-group">
+        <label for="df-h">Paso h</label>
+        <input type="number" id="df-h" placeholder="0.1" step="any">
+      </div>
+    `;
+  } else if (dfMode === 'comparar') {
+    grid.innerHTML = `
+      <div class="form-group full-width">
+        <label for="df-f-expr">Función f(x)</label>
+        <input type="text" id="df-f-expr" placeholder="exp(-2*x) - x" value="">
+        <span class="input-hint">Usa x como variable</span>
+      </div>
+      <div class="form-group">
+        <label for="df-x0">Punto x₀</label>
+        <input type="number" id="df-x0" placeholder="2" step="any">
+      </div>
+      <div class="form-group">
+        <label for="df-h">Paso h</label>
+        <input type="number" id="df-h" placeholder="0.01" step="any">
+      </div>
+    `;
+  } else if (dfMode === 'datos') {
+    area.appendChild(buildDFDatosTable());
+    return;
+  } else if (dfMode === 'xy') {
+    area.appendChild(buildDFXYTable());
+    const evalGroup = document.createElement('div');
+    evalGroup.className = 'form-grid';
+    evalGroup.style.marginTop = '12px';
+    evalGroup.innerHTML = `
+      <div class="form-group">
+        <label for="df-x-eval">Evaluar f'(x) en x =</label>
+        <input type="number" id="df-x-eval" placeholder="2.5" step="any">
+        <span class="input-hint">Opcional — usa punto vecino más cercano</span>
+      </div>
+    `;
+    area.appendChild(evalGroup);
+    return;
+  }
+  area.appendChild(grid);
+}
+
+function buildDFDatosTable() {
+  const wrap = document.createElement('div');
+  wrap.className = 'form-group full-width';
+  wrap.innerHTML = `<label>Datos posición-tiempo</label>`;
+  const tbl = document.createElement('div');
+  tbl.id = 'df-datos-table';
+  tbl.style.cssText = 'display:grid;grid-template-columns:36px 1fr 1fr 36px;gap:6px;align-items:center;margin-bottom:8px;';
+
+  const renderRows = () => {
+    tbl.innerHTML = `
+      <span style="color:var(--text-muted);font-size:.7rem;text-align:center">#</span>
+      <span style="color:var(--text-muted);font-size:.7rem">t (seg)</span>
+      <span style="color:var(--text-muted);font-size:.7rem">x (m)</span>
+      <span></span>
+    `;
+    dfDatosRows.forEach((row, i) => {
+      const num = Object.assign(document.createElement('span'), { textContent: i+1 });
+      num.style.cssText = 'color:var(--text-muted);font-size:.8rem;text-align:center';
+      const tIn = Object.assign(document.createElement('input'), { type:'number', step:'any', value: row.t, placeholder:'t' });
+      tIn.oninput = e => { dfDatosRows[i].t = e.target.value; };
+      const xIn = Object.assign(document.createElement('input'), { type:'number', step:'any', value: row.x, placeholder:'x' });
+      xIn.oninput = e => { dfDatosRows[i].x = e.target.value; };
+      const del = Object.assign(document.createElement('button'), { className:'remove-point-btn', title:'Eliminar', textContent:'×' });
+      del.onclick = () => { if (dfDatosRows.length <= 3) return; dfDatosRows.splice(i,1); renderRows(); };
+      tbl.append(num, tIn, xIn, del);
+    });
+  };
+  renderRows();
+  wrap.appendChild(tbl);
+  const addBtn = Object.assign(document.createElement('button'), { className:'add-point-btn', innerHTML:'＋ Agregar fila' });
+  addBtn.onclick = () => { dfDatosRows.push({t:'',x:''}); renderRows(); };
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
+function buildDFXYTable() {
+  const wrap = document.createElement('div');
+  wrap.className = 'form-group full-width';
+  wrap.innerHTML = `<label>Tabla de datos (x, y)</label>`;
+  const tbl = document.createElement('div');
+  tbl.id = 'df-xy-table';
+  tbl.style.cssText = 'display:grid;grid-template-columns:36px 1fr 1fr 36px;gap:6px;align-items:center;margin-bottom:8px;';
+
+  const renderRows = () => {
+    tbl.innerHTML = `
+      <span style="color:var(--text-muted);font-size:.7rem;text-align:center">#</span>
+      <span style="color:var(--text-muted);font-size:.7rem">x</span>
+      <span style="color:var(--text-muted);font-size:.7rem">y = f(x)</span>
+      <span></span>
+    `;
+    dfXYRows.forEach((row, i) => {
+      const num = Object.assign(document.createElement('span'), { textContent: i+1 });
+      num.style.cssText = 'color:var(--text-muted);font-size:.8rem;text-align:center';
+      const xIn = Object.assign(document.createElement('input'), { type:'number', step:'any', value: row.x, placeholder:'x' });
+      xIn.oninput = e => { dfXYRows[i].x = e.target.value; };
+      const yIn = Object.assign(document.createElement('input'), { type:'number', step:'any', value: row.y, placeholder:'y' });
+      yIn.oninput = e => { dfXYRows[i].y = e.target.value; };
+      const del = Object.assign(document.createElement('button'), { className:'remove-point-btn', title:'Eliminar', textContent:'×' });
+      del.onclick = () => { if (dfXYRows.length <= 3) return; dfXYRows.splice(i,1); renderRows(); };
+      tbl.append(num, xIn, yIn, del);
+    });
+  };
+  renderRows();
+  wrap.appendChild(tbl);
+  const addBtn = Object.assign(document.createElement('button'), { className:'add-point-btn', innerHTML:'＋ Agregar fila' });
+  addBtn.onclick = () => { dfXYRows.push({x:'',y:''}); renderRows(); };
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
+function ejecutarDifFinitas() {
+  if (dfMode === 'tabla') {
+    const fExpr = $('#df-f-expr')?.value || 'sin(x)';
+    const lista  = $('#df-x-lista')?.value || '0,0.1,0.2,0.3,0.4,0.5';
+    const h      = parseFloat($('#df-h')?.value || '0.1');
+    const xPuntos = lista.split(',').map(s => parseMathVal(s.trim())).filter(x => !isNaN(x));
+    if (!xPuntos.length) { showError('Ingresá al menos un punto x válido.'); return null; }
+    return difFinitasTabla(fExpr, xPuntos, h);
+  }
+  if (dfMode === 'comparar') {
+    const fExpr = $('#df-f-expr')?.value || 'exp(-2*x)-x';
+    const x0    = parseFloat($('#df-x0')?.value || '2');
+    const h     = parseFloat($('#df-h')?.value  || '0.01');
+    return difFinitasComparar(fExpr, x0, h);
+  }
+  if (dfMode === 'datos') {
+    const tDatos = dfDatosRows.map(r => parseFloat(r.t));
+    const xDatos = dfDatosRows.map(r => parseFloat(r.x));
+    if (tDatos.some(isNaN) || xDatos.some(isNaN)) { showError('Todos los valores deben ser numéricos.'); return null; }
+    return difFinitasDatos(tDatos, xDatos);
+  }
+  if (dfMode === 'xy') {
+    const filas = dfXYRows
+      .map(r => ({ x: parseFloat(r.x), y: parseFloat(r.y) }))
+      .filter(r => !isNaN(r.x) && !isNaN(r.y));
+    if (filas.length < 3) { showError('Se necesitan al menos 3 filas con x e y completos.'); return null; }
+    const xDatos = filas.map(r => r.x);
+    const yDatos = filas.map(r => r.y);
+    const xEval = parseFloat($('#df-x-eval')?.value);
+    return difFinitasDatosXY(xDatos, yDatos, isNaN(xEval) ? null : xEval);
+  }
+  return null;
+}
+
 // Parses a value string that may contain pi, e, and math functions
 function parseMathVal(str) {
   if (str === null || str === undefined || str.toString().trim() === '') return NaN;
@@ -2128,6 +2352,9 @@ function ejecutar() {
         return;
       }
       result = difFinitasDatos(tDatos, xDatos);
+    } else if (method.isDifFinitasUnified) {
+      result = ejecutarDifFinitas();
+      if (!result) return;
     } else {
       // Collect field values
       const values = {};
@@ -2251,6 +2478,13 @@ function displayResults(result) {
       addSummaryItem(summaryGrid, 'Puntos', result.historial.length, false);
       addSummaryItem(summaryGrid, 'v máx (m/s)', fmt(vMax), true);
       addSummaryItem(summaryGrid, 'a máx (m/s²)', fmt(aMax), false);
+    } else if (result.modoDifFinitas === 'xy') {
+      addSummaryItem(summaryGrid, 'Puntos', result.historial.length, false);
+      addSummaryItem(summaryGrid, "f'(x) central en x medio", fmt(result.historial[Math.floor(result.historial.length/2)]?.f1), false);
+      if (result.evalResult) {
+        addSummaryItem(summaryGrid, `f'(${fmt(result.evalResult.x)})`, fmt(result.evalResult.f1), true);
+        addSummaryItem(summaryGrid, `f''(${fmt(result.evalResult.x)})`, fmt(result.evalResult.f2), false);
+      }
     }
   } else if (result.isEDO) {
     addSummaryItem(summaryGrid, 'Método', result.metodoEDO, false);
@@ -2300,12 +2534,99 @@ function displayResults(result) {
   // Lagrange steps
   if (isLagrange) {
     renderLagrangeSteps(result);
+  } else if (result.isDifFinitas && result.modoDifFinitas === 'xy') {
+    renderDFXYSteps(result);
   } else {
     $('#lagrange-steps-card').style.display = 'none';
   }
 
   // Chart
   renderChart(result, isLagrange, isIntegration, isPiAproximation);
+}
+
+function renderDFXYSteps(result) {
+  const card = $('#lagrange-steps-card');
+  const container = $('#lagrange-steps');
+  card.style.display = 'block';
+  // Update title
+  card.querySelector('.card-title').innerHTML = `<span class="title-icon">🧮</span> Desarrollo — Diferencias Finitas`;
+  container.innerHTML = '';
+
+  const fc = (v) => (v === null || v === undefined) ? '—' : parseFloat(v.toFixed(6)).toString();
+  let html = '';
+
+  html += `<div class="step-section-title">Fórmulas utilizadas</div>`;
+  html += `<div class="step-block">
+    <div class="step-formula-line"><strong>Diferencia central (interiores):</strong></div>
+    <div class="step-formula-line" style="margin-top:6px">
+      <div class="step-fraction" style="display:inline-flex;flex-direction:column;align-items:center;gap:2px">
+        <span class="step-num">f(x<sub>i+1</sub>) − f(x<sub>i-1</sub>)</span>
+        <span class="step-bar" style="width:100%;height:1px;background:var(--text-muted);display:block;margin:3px 0"></span>
+        <span class="step-den">x<sub>i+1</sub> − x<sub>i-1</sub></span>
+      </div>
+    </div>
+    <div class="step-formula-line" style="margin-top:12px"><strong>Diferencia adelante (primer punto):</strong></div>
+    <div class="step-formula-line" style="margin-top:6px">
+      <div class="step-fraction" style="display:inline-flex;flex-direction:column;align-items:center;gap:2px">
+        <span class="step-num">f(x<sub>1</sub>) − f(x<sub>0</sub>)</span>
+        <span class="step-bar" style="width:100%;height:1px;background:var(--text-muted);display:block;margin:3px 0"></span>
+        <span class="step-den">x<sub>1</sub> − x<sub>0</sub></span>
+      </div>
+    </div>
+    <div class="step-formula-line" style="margin-top:12px"><strong>Diferencia atrás (último punto):</strong></div>
+    <div class="step-formula-line" style="margin-top:6px">
+      <div class="step-fraction" style="display:inline-flex;flex-direction:column;align-items:center;gap:2px">
+        <span class="step-num">f(x<sub>n</sub>) − f(x<sub>n-1</sub>)</span>
+        <span class="step-bar" style="width:100%;height:1px;background:var(--text-muted);display:block;margin:3px 0"></span>
+        <span class="step-den">x<sub>n</sub> − x<sub>n-1</sub></span>
+      </div>
+    </div>
+  </div>`;
+
+  html += `<div class="step-section-title" style="margin-top:20px">Paso a paso — Cálculo de f'(x) en cada punto</div>`;
+
+  const h = result.historial;
+  const n = h.length;
+  h.forEach((r, i) => {
+    let formula = '';
+    if (r.f1tipo === 'central') {
+      const prev = h[i-1], next = h[i+1];
+      formula = `f'(${fc(r.x)}) = (${fc(next.y)} − ${fc(prev.y)}) / (${fc(next.x)} − ${fc(prev.x)}) = <span class="step-poly">${fc(r.f1)}</span>`;
+    } else if (r.f1tipo === 'adelante') {
+      const next = h[i+1];
+      formula = `f'(${fc(r.x)}) = (${fc(next.y)} − ${fc(r.y)}) / (${fc(next.x)} − ${fc(r.x)}) = <span class="step-poly">${fc(r.f1)}</span>`;
+    } else {
+      const prev = h[i-1];
+      formula = `f'(${fc(r.x)}) = (${fc(r.y)} − ${fc(prev.y)}) / (${fc(r.x)} − ${fc(prev.x)}) = <span class="step-poly">${fc(r.f1)}</span>`;
+    }
+
+    let f2line = '';
+    if (r.f2 !== null && r.f2 !== undefined) {
+      const prev = h[i-1], next = h[i+1];
+      const hVal = (next.x - prev.x) / 2;
+      f2line = `<div class="step-formula-line" style="margin-top:8px">
+        f''(${fc(r.x)}) = (${fc(next.y)} − 2·${fc(r.y)} + ${fc(prev.y)}) / (${fc(hVal)})² = <span class="step-poly">${fc(r.f2)}</span>
+      </div>`;
+    }
+
+    html += `<div class="step-block">
+      <div class="step-label">Punto ${i+1}: x = ${fc(r.x)}, y = ${fc(r.y)} — <em>${r.f1tipo}</em></div>
+      <div class="step-formula-line">${formula}</div>
+      ${f2line}
+    </div>`;
+  });
+
+  if (result.evalResult) {
+    const ev = result.evalResult;
+    html += `<div class="step-section-title" style="margin-top:20px">Evaluación en x = ${fc(ev.x)}</div>`;
+    html += `<div class="step-block step-result">
+      <div class="step-formula-line">Vecinos usados: x = ${ev.vecinos.map(fc).join(', ')}</div>
+      <div class="step-formula-line" style="margin-top:6px">f'(${fc(ev.x)}) = <span class="step-poly">${fc(ev.f1)}</span></div>
+      ${ev.f2 !== null ? `<div class="step-formula-line" style="margin-top:4px">f''(${fc(ev.x)}) = <span class="step-poly">${fc(ev.f2)}</span></div>` : ''}
+    </div>`;
+  }
+
+  container.innerHTML = html;
 }
 
 function renderLagrangeSteps(result) {
@@ -2888,6 +3209,9 @@ function drawDifFinitasChart(ctx, W, H, pad, plotW, plotH, result) {
   } else if (result.modoDifFinitas === 'datos') {
     allX = result.graphX.map(p => p.x);
     allY = [...result.graphX.map(p => p.y), ...result.graphV.map(p => p.y), ...result.graphA.map(p => p.y)];
+  } else if (result.modoDifFinitas === 'xy') {
+    allX = result.graphY.map(p => p.x);
+    allY = [...result.graphY.map(p => p.y), ...result.graphF1.map(p => p.y)];
   }
 
   const xMin = Math.min(...allX), xMax = Math.max(...allX);
@@ -2952,6 +3276,28 @@ function drawDifFinitasChart(ctx, W, H, pad, plotW, plotH, result) {
       ctx.fillStyle = '#94a3b8'; ctx.font='11px Inter'; ctx.textAlign='left';
       ctx.fillText(lbl, lx + i*65 + 14, 17);
     });
+  } else if (result.modoDifFinitas === 'xy') {
+    polyline(result.graphY,  '#6366f1', 2.5, 'x', 'y');
+    polyline(result.graphF1, '#22d3ee', 2,   'x', 'y');
+    dots(result.graphY,  '#6366f1', 5, 'x', 'y');
+    dots(result.graphF1, '#22d3ee', 5, 'x', 'y');
+    // Mark xEval if present
+    if (result.evalResult) {
+      const cx = toX(result.evalResult.x);
+      const cy = toY(result.evalResult.f1);
+      ctx.fillStyle = 'rgba(251,191,36,0.2)';
+      ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 11px JetBrains Mono'; ctx.textAlign = 'left';
+      ctx.fillText(`f'(${fmt(result.evalResult.x)}) = ${fmt(result.evalResult.f1)}`, cx + 12, cy - 6);
+    }
+    ctx.fillStyle='#f1f5f9'; ctx.font='bold 13px Inter'; ctx.textAlign='left';
+    ctx.fillText("y = f(x)  y  f'(x) — Datos discretos", pad.left, 18);
+    ctx.fillStyle='#6366f1'; ctx.fillRect(W-160, 8, 10, 10);
+    ctx.fillStyle='#94a3b8'; ctx.font='11px Inter'; ctx.textAlign='left'; ctx.fillText('f(x)', W-146, 17);
+    ctx.fillStyle='#22d3ee'; ctx.fillRect(W-100, 8, 10, 10);
+    ctx.fillText("f'(x)", W-86, 17);
   }
 }
 
