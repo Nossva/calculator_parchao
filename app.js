@@ -1576,8 +1576,8 @@ const METHODS = {
       { id: 'f_expr', label: 'Función f(x)', placeholder: 'x^2', hint: 'Función a integrar', fullWidth: true },
       { id: 'confidence', label: 'Porcentaje de confianza', placeholder: '0.95', type: 'number', hint: 'Ej: 0.95 para 95%' },
       { id: 'sample_size_calc', label: 'Calcular muestras sugeridas', type: 'sample_size_calc', fullWidth: true },
-      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'number' },
-      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
+      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
+      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
       { id: 'n_muestras', label: 'Número de muestras', placeholder: '10000', type: 'number' },
     ],
     run: (v) => metodoMonteCarloIntegracion(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n_muestras))
