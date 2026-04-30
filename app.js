@@ -716,6 +716,577 @@ function aproximarPi(nPuntos) {
 }
 
 // ============================================
+// MONTE CARLO CON INTERVALO DE CONFIANZA
+// Calcula n automáticamente dado z y error máximo, luego integra
+// ============================================
+function monteCarloConfianza(fExpr, a, b, confianza, errorMax) {
+  const f = parseMathExpr(fExpr);
+
+  // z values for common confidence levels
+  const zMap = { 90: 1.645, 95: 1.960, 99: 2.576, 99.7: 3.000 };
+  const z = zMap[confianza] || 1.960;
+
+  // Pilot sample to estimate sigma
+  const nPiloto = 1000;
+  const piloto = [];
+  for (let i = 0; i < nPiloto; i++) {
+    const x = a + Math.random() * (b - a);
+    piloto.push(f(x));
+  }
+  const meanP = piloto.reduce((s, v) => s + v, 0) / nPiloto;
+  const varP = piloto.reduce((s, v) => s + (v - meanP) ** 2, 0) / nPiloto;
+  const sigmaP = Math.sqrt(varP) * (b - a);
+
+  // n = (z * sigma / errorMax)^2
+  const nCalculado = Math.ceil((z * sigmaP / errorMax) ** 2);
+  const n = Math.max(nCalculado, 1000);
+
+  const fValores = [];
+  for (let i = 0; i < n; i++) {
+    const x = a + Math.random() * (b - a);
+    fValores.push(f(x));
+  }
+
+  const long = b - a;
+  const media = fValores.reduce((s, v) => s + v, 0) / n;
+  const integral = long * media;
+  const varianza = fValores.reduce((s, v) => s + (v - media) ** 2, 0) / n;
+  const desvStd = Math.sqrt(varianza);
+  const errorEst = long * desvStd / Math.sqrt(n);
+  const ic_inf = integral - z * errorEst;
+  const ic_sup = integral + z * errorEst;
+
+  const historial = [
+    { concepto: 'n calculado', valor: nCalculado },
+    { concepto: 'n usado', valor: n },
+    { concepto: 'z (' + confianza + '%)', valor: z },
+    { concepto: 'σ estimada', valor: sigmaP.toFixed(8) },
+    { concepto: 'Integral', valor: integral.toFixed(8) },
+    { concepto: 'Error estándar', valor: errorEst.toFixed(8) },
+    { concepto: 'IC inferior', valor: ic_inf.toFixed(8) },
+    { concepto: 'IC superior', valor: ic_sup.toFixed(8) },
+  ];
+
+  const graphPoints = [];
+  for (let s = 0; s <= 200; s++) {
+    const xv = a + (b - a) * s / 200;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    isConfianza: true,
+    metodoIntegracion: 'Monte Carlo con IC',
+    integral, nMuestras: n, a, b,
+    intervalo: { a, b },
+    ic: { inf: ic_inf, sup: ic_sup, z, confianza, errorEst },
+    nCalculado,
+    desvStd,
+    graphPoints,
+    historial,
+    columns: ['Concepto', 'Valor'],
+    getRow: (h) => [h.concepto, h.valor]
+  };
+}
+
+// ============================================
+// MONTE CARLO INTEGRAL DOBLE
+// ∬ f(x,y) dy dx  con x ∈ [ax,bx], y ∈ [ay,by]
+// ============================================
+function monteCarloDoble(fExpr, ax, bx, ay, by, n) {
+  // f must depend on x and y — we compile as function(x,y)
+  let sanitized = fExpr
+    .replace(/\^/g, '**')
+    .replace(/sqrt\(/gi, 'Math.sqrt(')
+    .replace(/cbrt\(/gi, 'Math.cbrt(')
+    .replace(/sin\(/gi, 'Math.sin(')
+    .replace(/sen\(/gi, 'Math.sin(')
+    .replace(/cos\(/gi, 'Math.cos(')
+    .replace(/tan\(/gi, 'Math.tan(')
+    .replace(/exp\(/gi, 'Math.exp(')
+    .replace(/log\(/gi, 'Math.log(')
+    .replace(/ln\(/gi, 'Math.log(')
+    .replace(/abs\(/gi, 'Math.abs(')
+    .replace(/pi/gi, String(Math.PI))
+    .replace(/(?<![a-zA-Z\d\.])e(?![a-zA-Z\d\(])/g, String(Math.E));
+
+  let f;
+  try {
+    f = new Function('x', 'y', `"use strict"; return (${sanitized});`);
+  } catch (e) {
+    return { error: true, message: 'Expresión inválida para integral doble. Usa x e y como variables.' };
+  }
+
+  const area = (bx - ax) * (by - ay);
+  const fValores = [];
+  for (let i = 0; i < n; i++) {
+    const x = ax + Math.random() * (bx - ax);
+    const y = ay + Math.random() * (by - ay);
+    const val = f(x, y);
+    if (!isFinite(val)) continue;
+    fValores.push(val);
+  }
+
+  const media = fValores.reduce((s, v) => s + v, 0) / fValores.length;
+  const integral = area * media;
+  const varianza = fValores.reduce((s, v) => s + (v - media) ** 2, 0) / fValores.length;
+  const desvStd = Math.sqrt(varianza);
+  const errorEst = area * desvStd / Math.sqrt(fValores.length);
+
+  const historial = [
+    { concepto: 'n muestras', valor: n },
+    { concepto: 'Área dominio', valor: area.toFixed(6) },
+    { concepto: 'Media f(x,y)', valor: media.toFixed(8) },
+    { concepto: 'Integral ≈', valor: integral.toFixed(8) },
+    { concepto: 'Desv. estándar', valor: desvStd.toFixed(8) },
+    { concepto: 'Error estándar', valor: errorEst.toFixed(8) },
+  ];
+
+  // 2D graph: evaluate f(x, midY) along x for a preview curve
+  const midY = (ay + by) / 2;
+  const graphPoints = [];
+  for (let s = 0; s <= 200; s++) {
+    const xv = ax + (bx - ax) * s / 200;
+    const yv = f(xv, midY);
+    if (isFinite(yv)) graphPoints.push({ x: xv, y: yv });
+  }
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    isDoble: true,
+    metodoIntegracion: 'Monte Carlo Doble',
+    integral, nMuestras: n,
+    a: ax, b: bx,
+    intervalo: { a: ax, b: bx },
+    desvStd, errorEst,
+    graphPoints,
+    historial,
+    columns: ['Concepto', 'Valor'],
+    getRow: (h) => [h.concepto, h.valor]
+  };
+}
+
+// ============================================
+// MONTE CARLO RECHAZO ENTRE CURVAS
+// Estima el área entre f(x) y g(x) en [a,b]
+// donde f(x) >= g(x) (si no, se invierte)
+// ============================================
+function monteCarloRechazo(fExpr, gExpr, a, b, n) {
+  const fFunc = parseMathExpr(fExpr);
+  const gFunc = parseMathExpr(gExpr);
+
+  // Sample to find yMin and yMax for the bounding box
+  let yMin = Infinity, yMax = -Infinity;
+  const steps = 500;
+  for (let s = 0; s <= steps; s++) {
+    const x = a + (b - a) * s / steps;
+    const fv = fFunc(x), gv = gFunc(x);
+    if (isFinite(fv)) { yMin = Math.min(yMin, fv, gv); yMax = Math.max(yMax, fv, gv); }
+  }
+  yMin = Math.min(yMin, 0);
+
+  const boxArea = (b - a) * (yMax - yMin);
+  let dentroArea = 0;
+
+  const scatterF = [], scatterG = [], scatterDentro = [], scatterFuera = [];
+  const scatterMax = 2000; // only store a subset for rendering
+
+  for (let i = 0; i < n; i++) {
+    const x = a + Math.random() * (b - a);
+    const y = yMin + Math.random() * (yMax - yMin);
+    const fv = fFunc(x), gv = gFunc(x);
+    const lo = Math.min(fv, gv), hi = Math.max(fv, gv);
+    const inside = y >= lo && y <= hi;
+    if (inside) dentroArea++;
+    if (i < scatterMax) {
+      (inside ? scatterDentro : scatterFuera).push({ x, y });
+    }
+  }
+
+  // Build curve points
+  for (let s = 0; s <= 200; s++) {
+    const x = a + (b - a) * s / 200;
+    scatterF.push({ x, y: fFunc(x) });
+    scatterG.push({ x, y: gFunc(x) });
+  }
+
+  const areaEstimada = boxArea * dentroArea / n;
+  const proporcion = dentroArea / n;
+  const errorEst = boxArea * Math.sqrt(proporcion * (1 - proporcion) / n);
+
+  const historial = [
+    { concepto: 'n muestras', valor: n },
+    { concepto: 'Puntos dentro', valor: dentroArea },
+    { concepto: 'Área caja', valor: boxArea.toFixed(6) },
+    { concepto: 'Área estimada', valor: areaEstimada.toFixed(8) },
+    { concepto: 'Error estándar', valor: errorEst.toFixed(8) },
+  ];
+
+  return {
+    convergio: true,
+    isIntegration: false,
+    isRechazo: true,
+    integral: areaEstimada,
+    nMuestras: n,
+    a, b,
+    scatterF, scatterG, scatterDentro, scatterFuera,
+    yMin, yMax,
+    historial,
+    columns: ['Concepto', 'Valor'],
+    getRow: (h) => [h.concepto, h.valor]
+  };
+}
+
+// ============================================
+// EDO — EULER, HEUN, RUNGE-KUTTA 4
+// ============================================
+
+function parseEDO(expr) {
+  let s = expr
+    .replace(/\^/g, '**')
+    .replace(/sqrt\(/gi, 'Math.sqrt(')
+    .replace(/cbrt\(/gi, 'Math.cbrt(')
+    .replace(/sin\(/gi, 'Math.sin(')
+    .replace(/sen\(/gi, 'Math.sin(')
+    .replace(/cos\(/gi, 'Math.cos(')
+    .replace(/tan\(/gi, 'Math.tan(')
+    .replace(/exp\(/gi, 'Math.exp(')
+    .replace(/log\(/gi, 'Math.log(')
+    .replace(/ln\(/gi, 'Math.log(')
+    .replace(/abs\(/gi, 'Math.abs(')
+    .replace(/pi/gi, String(Math.PI))
+    .replace(/(?<![a-zA-Z\d\.])e(?![a-zA-Z\d\(])/g, String(Math.E));
+  return new Function('t', 'y', `"use strict"; return (${s});`);
+}
+
+function metodoEuler(fExpr, y0, t0, tf, h) {
+  let f;
+  try { f = parseEDO(fExpr); } catch(e) { return { error: true, message: 'Expresión inválida. Usa t e y como variables.' }; }
+  if (h <= 0) return { error: true, message: 'El paso h debe ser mayor que 0.' };
+
+  const historial = [];
+  let t = t0, y = y0;
+  historial.push({ paso: 0, t, y, k: null });
+
+  while (t < tf - h * 1e-9) {
+    const k = f(t, y);
+    y = y + h * k;
+    t = parseFloat((t + h).toFixed(10));
+    historial.push({ paso: historial.length, t, y, k });
+  }
+
+  const graphPoints = historial.map(r => ({ x: r.t, y: r.y }));
+
+  return {
+    convergio: true, isEDO: true, metodoEDO: 'Euler',
+    y_final: historial[historial.length - 1].y,
+    t_final: historial[historial.length - 1].t,
+    h, historial, graphPoints,
+    columns: ['Paso', 't', 'y', 'f(t,y)'],
+    getRow: (r) => [r.paso, fmt(r.t), fmt(r.y), r.k !== null ? fmt(r.k) : '—']
+  };
+}
+
+function metodoHeun(fExpr, y0, t0, tf, h) {
+  let f;
+  try { f = parseEDO(fExpr); } catch(e) { return { error: true, message: 'Expresión inválida. Usa t e y como variables.' }; }
+  if (h <= 0) return { error: true, message: 'El paso h debe ser mayor que 0.' };
+
+  const historial = [];
+  let t = t0, y = y0;
+  historial.push({ paso: 0, t, y, k1: null, k2: null, yPred: null });
+
+  while (t < tf - h * 1e-9) {
+    const k1 = f(t, y);
+    const yPred = y + h * k1;
+    const k2 = f(t + h, yPred);
+    y = y + (h / 2) * (k1 + k2);
+    t = parseFloat((t + h).toFixed(10));
+    historial.push({ paso: historial.length, t, y, k1, k2, yPred });
+  }
+
+  const graphPoints = historial.map(r => ({ x: r.t, y: r.y }));
+
+  return {
+    convergio: true, isEDO: true, metodoEDO: 'Heun',
+    y_final: historial[historial.length - 1].y,
+    t_final: historial[historial.length - 1].t,
+    h, historial, graphPoints,
+    columns: ['Paso', 't', 'y', 'k₁', 'k₂'],
+    getRow: (r) => [r.paso, fmt(r.t), fmt(r.y), r.k1 !== null ? fmt(r.k1) : '—', r.k2 !== null ? fmt(r.k2) : '—']
+  };
+}
+
+function metodoRK4(fExpr, y0, t0, tf, h) {
+  let f;
+  try { f = parseEDO(fExpr); } catch(e) { return { error: true, message: 'Expresión inválida. Usa t e y como variables.' }; }
+  if (h <= 0) return { error: true, message: 'El paso h debe ser mayor que 0.' };
+
+  const historial = [];
+  let t = t0, y = y0;
+  historial.push({ paso: 0, t, y, k1: null, k2: null, k3: null, k4: null });
+
+  while (t < tf - h * 1e-9) {
+    const k1 = f(t, y);
+    const k2 = f(t + h/2, y + h/2 * k1);
+    const k3 = f(t + h/2, y + h/2 * k2);
+    const k4 = f(t + h,   y + h   * k3);
+    y = y + (h / 6) * (k1 + 2*k2 + 2*k3 + k4);
+    t = parseFloat((t + h).toFixed(10));
+    historial.push({ paso: historial.length, t, y, k1, k2, k3, k4 });
+  }
+
+  const graphPoints = historial.map(r => ({ x: r.t, y: r.y }));
+
+  // Campo director: grilla de flechas
+  const campoDirector = [];
+  const nx = 15, ny = 12;
+  const tMin = t0, tMax = tf;
+  const yVals = historial.map(r => r.y);
+  const yMin = Math.min(...yVals) - Math.abs(Math.min(...yVals)) * 0.3 - 0.5;
+  const yMax = Math.max(...yVals) + Math.abs(Math.max(...yVals)) * 0.3 + 0.5;
+  for (let i = 0; i <= nx; i++) {
+    for (let j = 0; j <= ny; j++) {
+      const tt = tMin + (tMax - tMin) * i / nx;
+      const yy = yMin + (yMax - yMin) * j / ny;
+      const slope = f(tt, yy);
+      if (isFinite(slope)) campoDirector.push({ t: tt, y: yy, slope });
+    }
+  }
+
+  return {
+    convergio: true, isEDO: true, isRK4: true, metodoEDO: 'Runge-Kutta 4',
+    y_final: historial[historial.length - 1].y,
+    t_final: historial[historial.length - 1].t,
+    h, historial, graphPoints, campoDirector,
+    yMin, yMax,
+    columns: ['Paso', 't', 'y', 'k₁', 'k₂', 'k₃', 'k₄'],
+    getRow: (r) => [r.paso, fmt(r.t), fmt(r.y),
+      r.k1 !== null ? fmt(r.k1) : '—',
+      r.k2 !== null ? fmt(r.k2) : '—',
+      r.k3 !== null ? fmt(r.k3) : '—',
+      r.k4 !== null ? fmt(r.k4) : '—']
+  };
+}
+
+function compararEDO(fExpr, y0, t0, tf, h) {
+  let f;
+  try { f = parseEDO(fExpr); } catch(e) { return { error: true, message: 'Expresión inválida. Usa t e y como variables.' }; }
+  if (h <= 0) return { error: true, message: 'El paso h debe ser mayor que 0.' };
+
+  // Run all three methods
+  const euler = [], heun = [], rk4 = [];
+  let tE = t0, yE = y0;
+  let tH = t0, yH = y0;
+  let tR = t0, yR = y0;
+
+  euler.push({ t: t0, y: y0 });
+  heun.push({ t: t0, y: y0 });
+  rk4.push({ t: t0, y: y0 });
+
+  while (tE < tf - h * 1e-9) {
+    // Euler
+    yE = yE + h * f(tE, yE);
+    tE = parseFloat((tE + h).toFixed(10));
+    euler.push({ t: tE, y: yE });
+
+    // Heun
+    const k1h = f(tH, yH);
+    const yPred = yH + h * k1h;
+    yH = yH + (h/2) * (k1h + f(tH + h, yPred));
+    tH = parseFloat((tH + h).toFixed(10));
+    heun.push({ t: tH, y: yH });
+
+    // RK4
+    const k1 = f(tR, yR);
+    const k2 = f(tR + h/2, yR + h/2*k1);
+    const k3 = f(tR + h/2, yR + h/2*k2);
+    const k4 = f(tR + h,   yR + h*k3);
+    yR = yR + (h/6)*(k1 + 2*k2 + 2*k3 + k4);
+    tR = parseFloat((tR + h).toFixed(10));
+    rk4.push({ t: tR, y: yR });
+  }
+
+  // Historial comparativo
+  const historial = euler.map((e, i) => ({
+    paso: i,
+    t: e.t,
+    yEuler: e.y,
+    yHeun: heun[i]?.y ?? '—',
+    yRK4: rk4[i]?.y ?? '—'
+  }));
+
+  // Campo director usando RK4 f
+  const campoDirector = [];
+  const nx = 15, ny = 12;
+  const allY = [...euler, ...heun, ...rk4].map(p => p.y);
+  const yMin = Math.min(...allY) - 0.5;
+  const yMax = Math.max(...allY) + 0.5;
+  for (let i = 0; i <= nx; i++) {
+    for (let j = 0; j <= ny; j++) {
+      const tt = t0 + (tf - t0) * i / nx;
+      const yy = yMin + (yMax - yMin) * j / ny;
+      const slope = f(tt, yy);
+      if (isFinite(slope)) campoDirector.push({ t: tt, y: yy, slope });
+    }
+  }
+
+  return {
+    convergio: true, isEDO: true, isComparacion: true, metodoEDO: 'Comparación',
+    euler, heun, rk4, campoDirector, yMin, yMax,
+    historial,
+    columns: ['Paso', 't', 'y Euler', 'y Heun', 'y RK4'],
+    getRow: (r) => [r.paso, fmt(r.t), fmt(r.yEuler), fmt(r.yHeun), fmt(r.yRK4)]
+  };
+}
+
+// ============================================
+// DIFERENCIAS FINITAS
+// ============================================
+
+// Módulo 1: Derivadas de f(x) en tabla de puntos (f' y f'' con diferencias centrales)
+function difFinitasTabla(fExpr, xPuntos, h) {
+  const f = parseMathExpr(fExpr);
+  const n = xPuntos.length;
+  if (n < 1) return { error: true, message: 'Ingresá al menos un punto x.' };
+
+  const historial = xPuntos.map((x, i) => {
+    const fx   = f(x);
+    // f' — central donde se puede, adelante/atrás en extremos
+    let f1, f1tipo;
+    const fxph = f(x + h), fxmh = f(x - h);
+    if (i > 0 && i < n - 1) {
+      f1 = (fxph - fxmh) / (2 * h);
+      f1tipo = 'central';
+    } else if (i === 0) {
+      f1 = (fxph - fx) / h;
+      f1tipo = 'adelante';
+    } else {
+      f1 = (fx - fxmh) / h;
+      f1tipo = 'atrás';
+    }
+    // f'' — central (necesita vecinos)
+    const f2 = (i > 0 && i < n - 1) ? (fxph - 2*fx + fxmh) / (h*h) : null;
+    // valor exacto cos(x) si aplica, para error
+    return { x, fx, f1, f1tipo, f2 };
+  });
+
+  const graphPoints = [];
+  const x0 = xPuntos[0], xf = xPuntos[n-1];
+  for (let s = 0; s <= 200; s++) {
+    const xv = x0 + (xf - x0) * s / 200;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+  const graphF1 = historial.map(r => ({ x: r.x, y: r.f1 }));
+
+  return {
+    convergio: true, isDifFinitas: true, modoDifFinitas: 'tabla',
+    historial, graphPoints, graphF1,
+    columns: ['x', 'f(x)', "f'(x)", 'Tipo', "f''(x)"],
+    getRow: (r) => [fmt(r.x), fmt(r.fx), fmt(r.f1), r.f1tipo, r.f2 !== null ? fmt(r.f2) : '—']
+  };
+}
+
+// Módulo 2: Comparar adelante / atrás / central en un punto, con error vs exacta
+function difFinitasComparar(fExpr, x0, h) {
+  const f = parseMathExpr(fExpr);
+  const fx     = f(x0);
+  const fxph   = f(x0 + h);
+  const fxmh   = f(x0 - h);
+  const fxp2h  = f(x0 + 2*h);
+  const fxm2h  = f(x0 - 2*h);
+
+  // Orden 1
+  const adelante1  = (fxph - fx)   / h;
+  const atras1     = (fx  - fxmh)  / h;
+  const central1   = (fxph - fxmh) / (2*h);
+
+  // Orden 2 (segunda derivada)
+  const central2   = (fxph - 2*fx + fxmh) / (h*h);
+
+  // Orden 2 - fórmulas de segundo orden para f'
+  const adelante2o = (-fxp2h + 4*fxph - 3*fx) / (2*h);
+  const atras2o    = (3*fx - 4*fxmh + fxm2h)  / (2*h);
+
+  const historial = [
+    { formula: "Adelante 1° orden",  valor: adelante1,  orden: 1, tipo: 'adelante' },
+    { formula: "Atrás 1° orden",     valor: atras1,     orden: 1, tipo: 'atrás'   },
+    { formula: "Central 1° orden",   valor: central1,   orden: 1, tipo: 'central' },
+    { formula: "Adelante 2° orden",  valor: adelante2o, orden: 2, tipo: 'adelante' },
+    { formula: "Atrás 2° orden",     valor: atras2o,    orden: 2, tipo: 'atrás'   },
+    { formula: "Central 2° orden f''", valor: central2, orden: 2, tipo: 'central' },
+  ];
+
+  // Graph: f(x) around x0
+  const graphPoints = [];
+  for (let s = 0; s <= 200; s++) {
+    const xv = (x0 - 3*h) + 6*h * s / 200;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  return {
+    convergio: true, isDifFinitas: true, modoDifFinitas: 'comparar',
+    x0, h, fx,
+    adelante1, atras1, central1, central2, adelante2o, atras2o,
+    historial, graphPoints,
+    columns: ['Fórmula', "f'(x₀) aprox.", 'Orden', 'Tipo'],
+    getRow: (r) => [r.formula, fmt(r.valor), r.orden, r.tipo]
+  };
+}
+
+// Módulo 3: Tabla de datos posición → velocidad y aceleración
+function difFinitasDatos(tDatos, xDatos) {
+  const n = tDatos.length;
+  if (n < 3) return { error: true, message: 'Se necesitan al menos 3 puntos.' };
+  if (n !== xDatos.length) return { error: true, message: 'La cantidad de t y x no coincide.' };
+
+  const historial = tDatos.map((t, i) => {
+    const h = i < n-1 ? tDatos[i+1] - tDatos[i] : tDatos[i] - tDatos[i-1];
+    let v, a, vtipo, atipo;
+
+    if (i === 0) {
+      // Progresiva para v
+      const h0 = tDatos[1] - tDatos[0];
+      v = (xDatos[1] - xDatos[0]) / h0;
+      vtipo = 'adelante';
+      // Progresiva 2° para a
+      const h1 = tDatos[2] - tDatos[0];
+      a = (xDatos[2] - 2*xDatos[1] + xDatos[0]) / (h0*h0);
+      atipo = 'adelante';
+    } else if (i === n-1) {
+      // Regresiva para v
+      const hb = tDatos[i] - tDatos[i-1];
+      v = (xDatos[i] - xDatos[i-1]) / hb;
+      vtipo = 'atrás';
+      a = (xDatos[i] - 2*xDatos[i-1] + xDatos[i-2]) / (hb*hb);
+      atipo = 'atrás';
+    } else {
+      // Central
+      const hb = (tDatos[i+1] - tDatos[i-1]) / 2;
+      v = (xDatos[i+1] - xDatos[i-1]) / (tDatos[i+1] - tDatos[i-1]);
+      vtipo = 'central';
+      a = (xDatos[i+1] - 2*xDatos[i] + xDatos[i-1]) / (hb*hb);
+      atipo = 'central';
+    }
+
+    return { i, t, x: xDatos[i], v, a, vtipo, atipo };
+  });
+
+  const graphX  = historial.map(r => ({ x: r.t, y: r.x }));
+  const graphV  = historial.map(r => ({ x: r.t, y: r.v }));
+  const graphA  = historial.map(r => ({ x: r.t, y: r.a }));
+
+  return {
+    convergio: true, isDifFinitas: true, modoDifFinitas: 'datos',
+    historial, graphX, graphV, graphA,
+    columns: ['i', 't (s)', 'x (m)', 'v (m/s)', 'a (m/s²)', 'Tipo v', 'Tipo a'],
+    getRow: (r) => [r.i, fmt(r.t), fmt(r.x), fmt(r.v), fmt(r.a), r.vtipo, r.atipo]
+  };
+}
+
+// ============================================
 // UI CONTROLLER
 // ============================================
 const METHODS = {
@@ -805,18 +1376,129 @@ const METHODS = {
     ],
     run: (v) => metodoMonteCarloIntegracion(v.f_expr, parseFloat(v.a), parseFloat(v.b), parseInt(v.n_muestras))
   },
-  pi_approximation: {
-    name: 'Monte Carlo - Aproximar π',
-    description: 'Aproxima π usando círculo inscrito en cuadrado.',
+  monte_carlo_ic: {
+    name: 'Monte Carlo - IC',
+    description: 'Integración con intervalo de confianza y n automático.',
     fields: [
-      { id: 'n_puntos', label: 'Número de puntos', placeholder: '100000', type: 'number' },
+      { id: 'f_expr', label: 'Función f(x)', placeholder: 'exp(-x^2)', hint: 'Función a integrar', fullWidth: true },
+      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'number' },
+      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
+      { id: 'confianza', label: 'Confianza (%)', placeholder: '95', hint: '90 / 95 / 99 / 99.7', type: 'number' },
+      { id: 'error_max', label: 'Error máximo', placeholder: '0.01', type: 'number' },
     ],
-    run: (v) => aproximarPi(parseInt(v.n_puntos))
+    run: (v) => monteCarloConfianza(v.f_expr, parseFloat(v.a), parseFloat(v.b), parseFloat(v.confianza), parseFloat(v.error_max))
+  },
+  monte_carlo_doble: {
+    name: 'Monte Carlo - Integral Doble',
+    description: 'Estima ∬ f(x,y) dy dx usando muestreo aleatorio.',
+    fields: [
+      { id: 'f_expr', label: 'Función f(x,y)', placeholder: 'exp(x+y)', hint: 'Usa x e y como variables', fullWidth: true },
+      { id: 'ax', label: 'x mínimo', placeholder: '0', type: 'number' },
+      { id: 'bx', label: 'x máximo', placeholder: '2', type: 'number' },
+      { id: 'ay', label: 'y mínimo', placeholder: '1', type: 'number' },
+      { id: 'by', label: 'y máximo', placeholder: '3', type: 'number' },
+      { id: 'n_muestras', label: 'Muestras (n)', placeholder: '50000', type: 'number' },
+    ],
+    run: (v) => monteCarloDoble(v.f_expr, parseFloat(v.ax), parseFloat(v.bx), parseFloat(v.ay), parseFloat(v.by), parseInt(v.n_muestras))
+  },
+  monte_carlo_rechazo: {
+    name: 'Monte Carlo - Rechazo',
+    description: 'Estima el área entre dos curvas f(x) y g(x).',
+    fields: [
+      { id: 'f_expr', label: 'Curva superior f(x)', placeholder: 'sqrt(x)', hint: 'Primera curva', fullWidth: true },
+      { id: 'g_expr', label: 'Curva inferior g(x)', placeholder: 'x^2', hint: 'Segunda curva', fullWidth: true },
+      { id: 'a', label: 'x mínimo', placeholder: '0', type: 'number' },
+      { id: 'b', label: 'x máximo', placeholder: '1', type: 'number' },
+      { id: 'n_muestras', label: 'Muestras (n)', placeholder: '50000', type: 'number' },
+    ],
+    run: (v) => monteCarloRechazo(v.f_expr, v.g_expr, parseFloat(v.a), parseFloat(v.b), parseInt(v.n_muestras))
+  },
+  euler: {
+    name: 'Euler',
+    description: 'Resuelve EDO dy/dt = f(t,y) con el método de Euler.',
+    fields: [
+      { id: 'f_expr', label: "f(t, y)  —  dy/dt =", placeholder: 'y + t^2', hint: 'Usa t e y como variables', fullWidth: true },
+      { id: 'y0', label: 'y(t₀)', placeholder: '1', type: 'number' },
+      { id: 't0', label: 't₀', placeholder: '0', type: 'number' },
+      { id: 'tf', label: 'tf', placeholder: '1', type: 'number' },
+      { id: 'h', label: 'Paso h', placeholder: '0.1', type: 'number' },
+    ],
+    run: (v) => metodoEuler(v.f_expr, parseFloat(v.y0), parseFloat(v.t0), parseFloat(v.tf), parseFloat(v.h))
+  },
+  heun: {
+    name: 'Heun (Euler mejorado)',
+    description: 'Resuelve EDO dy/dt = f(t,y) con el método de Heun.',
+    fields: [
+      { id: 'f_expr', label: "f(t, y)  —  dy/dt =", placeholder: 'y + t^2', hint: 'Usa t e y como variables', fullWidth: true },
+      { id: 'y0', label: 'y(t₀)', placeholder: '1', type: 'number' },
+      { id: 't0', label: 't₀', placeholder: '0', type: 'number' },
+      { id: 'tf', label: 'tf', placeholder: '1', type: 'number' },
+      { id: 'h', label: 'Paso h', placeholder: '0.1', type: 'number' },
+    ],
+    run: (v) => metodoHeun(v.f_expr, parseFloat(v.y0), parseFloat(v.t0), parseFloat(v.tf), parseFloat(v.h))
+  },
+  runge_kutta: {
+    name: 'Runge-Kutta 4',
+    description: 'Resuelve EDO dy/dt = f(t,y) con RK4 y campo director.',
+    fields: [
+      { id: 'f_expr', label: "f(t, y)  —  dy/dt =", placeholder: 'y + t^2', hint: 'Usa t e y como variables', fullWidth: true },
+      { id: 'y0', label: 'y(t₀)', placeholder: '1', type: 'number' },
+      { id: 't0', label: 't₀', placeholder: '0', type: 'number' },
+      { id: 'tf', label: 'tf', placeholder: '1', type: 'number' },
+      { id: 'h', label: 'Paso h', placeholder: '0.1', type: 'number' },
+    ],
+    run: (v) => metodoRK4(v.f_expr, parseFloat(v.y0), parseFloat(v.t0), parseFloat(v.tf), parseFloat(v.h))
+  },
+  comparar_edo: {
+    name: 'Comparar Euler / Heun / RK4',
+    description: 'Compara los tres métodos en la misma EDO con tabla y gráfico.',
+    fields: [
+      { id: 'f_expr', label: "f(t, y)  —  dy/dt =", placeholder: 'y + t^2', hint: 'Usa t e y como variables', fullWidth: true },
+      { id: 'y0', label: 'y(t₀)', placeholder: '1', type: 'number' },
+      { id: 't0', label: 't₀', placeholder: '0', type: 'number' },
+      { id: 'tf', label: 'tf', placeholder: '1', type: 'number' },
+      { id: 'h', label: 'Paso h', placeholder: '0.1', type: 'number' },
+    ],
+    run: (v) => compararEDO(v.f_expr, parseFloat(v.y0), parseFloat(v.t0), parseFloat(v.tf), parseFloat(v.h))
+  },
+  df_tabla: {
+    name: 'Dif. Finitas — Tabla de puntos',
+    description: "Calcula f'(x) y f''(x) en una lista de puntos con diferencias centrales.",
+    fields: [
+      { id: 'f_expr', label: 'Función f(x)', placeholder: 'sin(x)', hint: 'Usa x como variable', fullWidth: true },
+      { id: 'x_lista', label: 'Puntos x (separados por coma)', placeholder: '0, 0.1, 0.2, 0.3, 0.4, 0.5', hint: 'Ej: 0, 0.1, 0.2, 0.3', fullWidth: true },
+      { id: 'h', label: 'Paso h', placeholder: '0.1', type: 'number' },
+    ],
+    run: (v) => {
+      const xPuntos = v.x_lista.split(',').map(s => parseMathVal(s.trim())).filter(x => !isNaN(x));
+      return difFinitasTabla(v.f_expr, xPuntos, parseFloat(v.h));
+    }
+  },
+  df_comparar: {
+    name: 'Dif. Finitas — Comparar fórmulas',
+    description: "Compara adelante, atrás y central (orden 1 y 2) en un punto x₀.",
+    fields: [
+      { id: 'f_expr', label: 'Función f(x)', placeholder: 'exp(-2*x) - x', hint: 'Usa x como variable', fullWidth: true },
+      { id: 'x0', label: 'Punto x₀', placeholder: '2', type: 'number' },
+      { id: 'h', label: 'Paso h', placeholder: '0.01', type: 'number' },
+    ],
+    run: (v) => difFinitasComparar(v.f_expr, parseFloat(v.x0), parseFloat(v.h))
+  },
+  df_datos: {
+    name: 'Dif. Finitas — Datos (v y a)',
+    description: 'Calcula velocidad y aceleración a partir de datos posición-tiempo.',
+    isDFDatos: true,
+    fields: [],
+    run: null
   }
 };
 
 let currentMethod = 'biseccion';
 let lagrangePoints = [{ x: '0', y: '0' }, { x: String(Math.PI / 2), y: '1' }, { x: String(Math.PI), y: '0' }];
+let dfDatosRows = [
+  {t:'0',x:'0'},{t:'1',x:'1.9'},{t:'2',x:'4.2'},{t:'3',x:'7.8'},
+  {t:'4',x:'12'},{t:'5',x:'17'},{t:'6',x:'25'},{t:'7',x:'32'},{t:'8',x:'42'}
+];
 
 // --- DOM References ---
 function $(sel) { return document.querySelector(sel); }
@@ -838,7 +1520,16 @@ function renderSidebar() {
     trapecio: '📐',
     simpson: '📏',
     monte_carlo: '🎲',
-    pi_approximation: '🥧'
+    monte_carlo_ic: '📊',
+    monte_carlo_doble: '🔲',
+    monte_carlo_rechazo: '🎯',
+    euler: '📐',
+    heun: '📏',
+    runge_kutta: '🔬',
+    comparar_edo: '⚖️',
+    df_tabla: '∂',
+    df_comparar: '≈',
+    df_datos: '🚗'
   };
   const subtitles = {
     biseccion: 'Búsqueda de raíces',
@@ -849,7 +1540,16 @@ function renderSidebar() {
     trapecio: 'Regla del Trapecio',
     simpson: 'Regla de Simpson 1/3',
     monte_carlo: 'Muestreo aleatorio',
-    pi_approximation: 'Aproximación de π'
+    monte_carlo_ic: 'Intervalo de confianza',
+    monte_carlo_doble: 'Integral doble ∬',
+    monte_carlo_rechazo: 'Área entre curvas',
+    euler: 'EDO — Método de Euler',
+    heun: 'EDO — Euler mejorado',
+    runge_kutta: 'EDO — RK4 + campo director',
+    comparar_edo: 'EDO — Comparación de métodos',
+    df_tabla: "f'(x) y f''(x) en múltiples puntos",
+    df_comparar: 'Adelante / Atrás / Central',
+    df_datos: 'Velocidad y aceleración'
   };
 
   const list = $('#method-list');
@@ -900,6 +1600,11 @@ function renderForm(key, method) {
 
   if (method.isLagrange) {
     renderLagrangeForm(formContainer);
+    return;
+  }
+
+  if (method.isDFDatos) {
+    renderDFDatosForm(formContainer);
     return;
   }
 
@@ -999,6 +1704,64 @@ function rerenderLagrangePoints() {
   });
 }
 
+function renderDFDatosForm(container) {
+  const header = document.createElement('div');
+  header.className = 'form-group full-width';
+  header.innerHTML = `<label>Datos posición-tiempo</label>`;
+
+  const table = document.createElement('div');
+  table.id = 'df-datos-table';
+  table.style.cssText = 'display:grid; grid-template-columns: 40px 1fr 1fr 40px; gap:6px; align-items:center; margin-bottom:8px;';
+
+  const renderRows = () => {
+    table.innerHTML = `
+      <span style="color:var(--text-muted);font-size:.7rem;text-align:center">#</span>
+      <span style="color:var(--text-muted);font-size:.7rem">t (seg)</span>
+      <span style="color:var(--text-muted);font-size:.7rem">x (m)</span>
+      <span></span>
+    `;
+    dfDatosRows.forEach((row, i) => {
+      const num = document.createElement('span');
+      num.style.cssText = 'color:var(--text-muted);font-size:.8rem;text-align:center';
+      num.textContent = i + 1;
+
+      const tIn = document.createElement('input');
+      tIn.type = 'number'; tIn.step = 'any';
+      tIn.className = 'df-t-input'; tIn.value = row.t; tIn.placeholder = 't';
+      tIn.oninput = (e) => { dfDatosRows[i].t = e.target.value; };
+
+      const xIn = document.createElement('input');
+      xIn.type = 'number'; xIn.step = 'any';
+      xIn.className = 'df-x-input'; xIn.value = row.x; xIn.placeholder = 'x';
+      xIn.oninput = (e) => { dfDatosRows[i].x = e.target.value; };
+
+      const del = document.createElement('button');
+      del.className = 'remove-point-btn'; del.title = 'Eliminar'; del.textContent = '×';
+      del.onclick = () => {
+        if (dfDatosRows.length <= 3) return;
+        dfDatosRows.splice(i, 1);
+        renderRows();
+      };
+
+      table.appendChild(num); table.appendChild(tIn);
+      table.appendChild(xIn); table.appendChild(del);
+    });
+  };
+
+  renderRows();
+  header.appendChild(table);
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'add-point-btn';
+  addBtn.innerHTML = '＋ Agregar fila';
+  addBtn.onclick = () => {
+    dfDatosRows.push({ t: '', x: '' });
+    renderRows();
+  };
+  header.appendChild(addBtn);
+  container.appendChild(header);
+}
+
 // Parses a value string that may contain pi, e, and math functions
 function parseMathVal(str) {
   if (str === null || str === undefined || str.toString().trim() === '') return NaN;
@@ -1032,18 +1795,23 @@ function ejecutar() {
 
   try {
     if (method.isLagrange) {
-      // Collect Lagrange points
       const xPuntos = lagrangePoints.map(p => parseMathVal(p.x));
       const yPuntos = lagrangePoints.map(p => parseMathVal(p.y));
       const xEvalField = $('#field-x_eval');
       const xEval = xEvalField && xEvalField.value ? parseMathVal(xEvalField.value) : null;
-
       if (xPuntos.some(isNaN) || yPuntos.some(isNaN)) {
         showError('Todos los puntos deben tener valores numéricos válidos.');
         return;
       }
-
       result = interpolacionLagrange(xPuntos, yPuntos, xEval);
+    } else if (method.isDFDatos) {
+      const tDatos = dfDatosRows.map(r => parseFloat(r.t));
+      const xDatos = dfDatosRows.map(r => parseFloat(r.x));
+      if (tDatos.some(isNaN) || xDatos.some(isNaN)) {
+        showError('Todos los valores de t y x deben ser numéricos.');
+        return;
+      }
+      result = difFinitasDatos(tDatos, xDatos);
     } else {
       // Collect field values
       const values = {};
@@ -1076,7 +1844,17 @@ function displayResults(result) {
   const statusEl = $('#result-status');
   if (result.convergio) {
     statusEl.className = 'status-badge success';
-    statusEl.innerHTML = `✅ Convergencia exitosa${result.iteraciones !== undefined ? ` en ${result.iteraciones} iteraciones` : ''}`;
+    statusEl.innerHTML = result.isDifFinitas
+      ? `✅ Diferencias Finitas — ${result.historial.length} filas calculadas`
+      : result.isEDO
+      ? `✅ ${result.metodoEDO} — ${result.historial.length - 1} pasos completados`
+      : result.isRechazo
+      ? `✅ Área estimada: ${fmt(result.integral)} (n = ${result.nMuestras.toLocaleString()} muestras)`
+      : result.isConfianza
+        ? `✅ Integral estimada con IC ${result.ic.confianza}% — n = ${result.nMuestras.toLocaleString()}`
+        : result.isDoble
+          ? `✅ Integral doble estimada — n = ${result.nMuestras.toLocaleString()} muestras`
+          : `✅ Convergencia exitosa${result.iteraciones !== undefined ? ` en ${result.iteraciones} iteraciones` : ''}`;
   } else if (result.divergio) {
     statusEl.className = 'status-badge error';
     statusEl.innerHTML = `❌ El método divergió${result.motivoError ? ': ' + result.motivoError : ''}`;
@@ -1103,8 +1881,20 @@ function displayResults(result) {
     addSummaryItem(summaryGrid, 'Error %', fmt(result.errorPorcentaje) + '%', false);
     addSummaryItem(summaryGrid, 'Puntos dentro', result.puntosDestro.toLocaleString(), false);
     addSummaryItem(summaryGrid, 'Puntos totales', result.nPuntos.toLocaleString(), false);
+  } else if (result.isRechazo) {
+    addSummaryItem(summaryGrid, 'Área estimada', fmt(result.integral), true);
+    addSummaryItem(summaryGrid, 'Muestras (n)', result.nMuestras, false);
+    addSummaryItem(summaryGrid, 'Intervalo x', `[${fmt(result.a)}, ${fmt(result.b)}]`, false);
   } else if (isIntegration) {
     addSummaryItem(summaryGrid, 'Integral Aproximada', fmt(result.integral), true);
+    if (result.ic) {
+      addSummaryItem(summaryGrid, `IC ${result.ic.confianza}% inferior`, fmt(result.ic.inf), false);
+      addSummaryItem(summaryGrid, `IC ${result.ic.confianza}% superior`, fmt(result.ic.sup), false);
+      addSummaryItem(summaryGrid, 'Error estándar', fmtSci(result.ic.errorEst), false);
+    }
+    if (result.nCalculado) {
+      addSummaryItem(summaryGrid, 'n calculado', result.nCalculado, false);
+    }
     if (result.gaussLegendre) {
       addSummaryItem(summaryGrid, 'Gauss-Legendre (ref.)', fmt(result.gaussLegendre), false);
       addSummaryItem(summaryGrid, 'Error vs G-L', fmtSci(result.errorVsGauss), false);
@@ -1118,7 +1908,44 @@ function displayResults(result) {
     if (result.nMuestras) {
       addSummaryItem(summaryGrid, 'Muestras', result.nMuestras, false);
     }
-    addSummaryItem(summaryGrid, 'Intervalo', `[${fmt(result.a || result.intervalo.a)}, ${fmt(result.b || result.intervalo.b)}]`, false);
+    if (result.desvStd !== undefined) {
+      addSummaryItem(summaryGrid, 'Desv. estándar', fmtSci(result.desvStd), false);
+    }
+    const ia = result.a ?? result.intervalo?.a;
+    const ib = result.b ?? result.intervalo?.b;
+    if (ia !== undefined) addSummaryItem(summaryGrid, 'Intervalo', `[${fmt(ia)}, ${fmt(ib)}]`, false);
+  } else if (result.isDifFinitas) {
+    if (result.modoDifFinitas === 'comparar') {
+      addSummaryItem(summaryGrid, 'x₀', fmt(result.x0), false);
+      addSummaryItem(summaryGrid, 'h', fmt(result.h), false);
+      addSummaryItem(summaryGrid, 'f(x₀)', fmt(result.fx), false);
+      addSummaryItem(summaryGrid, "f' central (ord 1)", fmt(result.central1), true);
+      addSummaryItem(summaryGrid, "f' adelante (ord 1)", fmt(result.adelante1), false);
+      addSummaryItem(summaryGrid, "f' atrás (ord 1)", fmt(result.atras1), false);
+      addSummaryItem(summaryGrid, "f'' central (ord 2)", fmt(result.central2), false);
+    } else if (result.modoDifFinitas === 'tabla') {
+      addSummaryItem(summaryGrid, 'Puntos evaluados', result.historial.length, false);
+      addSummaryItem(summaryGrid, "f' en primer punto", fmt(result.historial[0]?.f1), false);
+      addSummaryItem(summaryGrid, "f' en último punto", fmt(result.historial[result.historial.length-1]?.f1), false);
+    } else if (result.modoDifFinitas === 'datos') {
+      const vMax = Math.max(...result.historial.map(r => Math.abs(r.v)));
+      const aMax = Math.max(...result.historial.map(r => Math.abs(r.a)));
+      addSummaryItem(summaryGrid, 'Puntos', result.historial.length, false);
+      addSummaryItem(summaryGrid, 'v máx (m/s)', fmt(vMax), true);
+      addSummaryItem(summaryGrid, 'a máx (m/s²)', fmt(aMax), false);
+    }
+  } else if (result.isEDO) {
+    addSummaryItem(summaryGrid, 'Método', result.metodoEDO, false);
+    addSummaryItem(summaryGrid, 'Paso h', fmt(result.h), false);
+    addSummaryItem(summaryGrid, 'Pasos totales', result.historial.length - 1, false);
+    if (!result.isComparacion) {
+      addSummaryItem(summaryGrid, `y(${fmt(result.t_final)})`, fmt(result.y_final), true);
+    } else {
+      const last = result.historial[result.historial.length - 1];
+      addSummaryItem(summaryGrid, `y Euler (t=${fmt(last.t)})`, fmt(last.yEuler), false);
+      addSummaryItem(summaryGrid, `y Heun  (t=${fmt(last.t)})`, fmt(last.yHeun), false);
+      addSummaryItem(summaryGrid, `y RK4   (t=${fmt(last.t)})`, fmt(last.yRK4), true);
+    }
   } else if (isLagrange) {
     addSummaryItem(summaryGrid, 'Grado del Polinomio', result.grado, false);
     addSummaryItem(summaryGrid, 'Puntos utilizados', result.dataPuntos.length, false);
@@ -1323,7 +2150,13 @@ function renderChart(result, isLagrange) {
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
 
-  if (isIntegration && result.graphPoints) {
+  if (result.isDifFinitas) {
+    drawDifFinitasChart(ctx, W, H, pad, plotW, plotH, result);
+  } else if (result.isEDO) {
+    drawEDOChart(ctx, W, H, pad, plotW, plotH, result);
+  } else if (result.isRechazo) {
+    drawRechazoChart(ctx, W, H, pad, plotW, plotH, result);
+  } else if (isIntegration && result.graphPoints) {
     drawIntegrationChart(ctx, W, H, pad, plotW, plotH, result);
   } else if (isLagrange && result.graphPoints) {
     drawLagrangeChart(ctx, W, H, pad, plotW, plotH, result);
@@ -1704,6 +2537,275 @@ function drawIntegrationChart(ctx, W, H, pad, plotW, plotH, result) {
   ctx.font = 'bold 12px JetBrains Mono';
   ctx.textAlign = 'right';
   ctx.fillText(`∫ ≈ ${fmt(result.integral)}`, W - pad.right, 19);
+}
+
+function drawDifFinitasChart(ctx, W, H, pad, plotW, plotH, result) {
+  // Helper: draw a polyline
+  function polyline(pts, color, lineW, xKey, yKey) {
+    if (!pts || pts.length === 0) return;
+    ctx.strokeStyle = color; ctx.lineWidth = lineW;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const cx = toX(p[xKey]), cy = toY(p[yKey]);
+      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    });
+    ctx.stroke();
+  }
+  function dots(pts, color, r, xKey, yKey) {
+    pts.forEach(p => {
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(toX(p[xKey]), toY(p[yKey]), r, 0, Math.PI*2); ctx.fill();
+    });
+  }
+
+  // Gather all points to compute ranges
+  let allX = [], allY = [];
+  if (result.modoDifFinitas === 'tabla') {
+    allX = result.graphPoints.map(p => p.x);
+    allY = [...result.graphPoints.map(p => p.y), ...result.graphF1.map(p => p.y)];
+  } else if (result.modoDifFinitas === 'comparar') {
+    allX = result.graphPoints.map(p => p.x);
+    allY = result.graphPoints.map(p => p.y);
+  } else if (result.modoDifFinitas === 'datos') {
+    allX = result.graphX.map(p => p.x);
+    allY = [...result.graphX.map(p => p.y), ...result.graphV.map(p => p.y), ...result.graphA.map(p => p.y)];
+  }
+
+  const xMin = Math.min(...allX), xMax = Math.max(...allX);
+  const yMin = Math.min(...allY) - 0.5, yMax = Math.max(...allY) + 0.5;
+  const rangeX = xMax - xMin || 1, rangeY = yMax - yMin || 1;
+
+  const toX = (x) => pad.left + plotW * (x - xMin) / rangeX;
+  const toY = (y) => pad.top  + plotH * (1 - (y - yMin) / rangeY);
+
+  // Background + grid
+  ctx.fillStyle = 'rgba(10,14,26,0.5)'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + plotH * i / 5;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W-pad.right, y); ctx.stroke();
+    const x = pad.left + plotW * i / 5;
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top+plotH); ctx.stroke();
+  }
+  // Axis y=0
+  if (yMin < 0 && yMax > 0) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+    const y0 = toY(0);
+    ctx.beginPath(); ctx.moveTo(pad.left, y0); ctx.lineTo(W-pad.right, y0); ctx.stroke();
+  }
+  // Labels
+  ctx.fillStyle = '#64748b'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    ctx.fillText((yMax - rangeY*i/5).toFixed(2), pad.left-6, pad.top+plotH*i/5+4);
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 5; i++) {
+    ctx.fillText((xMin + rangeX*i/5).toFixed(2), pad.left+plotW*i/5, H-pad.bottom+16);
+  }
+
+  if (result.modoDifFinitas === 'tabla') {
+    polyline(result.graphPoints, '#6366f1', 2, 'x', 'y');
+    polyline(result.graphF1,    '#22d3ee', 2, 'x', 'y');
+    dots(result.historial, '#f87171', 4, 'x', 'f1');
+    ctx.fillStyle='#f1f5f9'; ctx.font='bold 13px Inter'; ctx.textAlign='left';
+    ctx.fillText("f(x) y f'(x) — Diferencias Finitas", pad.left, 18);
+    // Legend
+    ctx.fillStyle='#6366f1'; ctx.fillRect(W-160, 8, 10, 10);
+    ctx.fillStyle='#94a3b8'; ctx.font='11px Inter'; ctx.textAlign='left'; ctx.fillText('f(x)', W-146, 17);
+    ctx.fillStyle='#22d3ee'; ctx.fillRect(W-100, 8, 10, 10);
+    ctx.fillText("f'(x)", W-86, 17);
+  } else if (result.modoDifFinitas === 'comparar') {
+    polyline(result.graphPoints, '#6366f1', 2.5, 'x', 'y');
+    ctx.fillStyle='#f1f5f9'; ctx.font='bold 13px Inter'; ctx.textAlign='left';
+    ctx.fillText('f(x) — Comparación de fórmulas', pad.left, 18);
+  } else if (result.modoDifFinitas === 'datos') {
+    polyline(result.graphX, '#6366f1', 2.5, 'x', 'y');
+    polyline(result.graphV, '#22d3ee', 2,   'x', 'y');
+    polyline(result.graphA, '#f97316', 2,   'x', 'y');
+    dots(result.graphX, '#6366f1', 4, 'x', 'y');
+    dots(result.graphV, '#22d3ee', 4, 'x', 'y');
+    dots(result.graphA, '#f97316', 4, 'x', 'y');
+    ctx.fillStyle='#f1f5f9'; ctx.font='bold 13px Inter'; ctx.textAlign='left';
+    ctx.fillText('Posición / Velocidad / Aceleración', pad.left, 18);
+    const lx = W - pad.right - 200;
+    [['x(t)', '#6366f1'], ['v(t)', '#22d3ee'], ['a(t)', '#f97316']].forEach(([lbl, col], i) => {
+      ctx.fillStyle = col; ctx.fillRect(lx + i*65, 8, 10, 10);
+      ctx.fillStyle = '#94a3b8'; ctx.font='11px Inter'; ctx.textAlign='left';
+      ctx.fillText(lbl, lx + i*65 + 14, 17);
+    });
+  }
+}
+
+function drawEDOChart(ctx, W, H, pad, plotW, plotH, result) {
+  const allPts = result.isComparacion
+    ? [...result.euler, ...result.heun, ...result.rk4]
+    : result.graphPoints;
+
+  const tMin = Math.min(...allPts.map(p => p.x ?? p.t));
+  const tMax = Math.max(...allPts.map(p => p.x ?? p.t));
+  const yMin = result.yMin ?? Math.min(...allPts.map(p => p.y)) - 0.5;
+  const yMax = result.yMax ?? Math.max(...allPts.map(p => p.y)) + 0.5;
+  const rangeT = tMax - tMin || 1;
+  const rangeY = yMax - yMin || 1;
+
+  const toX = (t) => pad.left + plotW * (t - tMin) / rangeT;
+  const toY = (y) => pad.top + plotH * (1 - (y - yMin) / rangeY);
+
+  // Background
+  ctx.fillStyle = 'rgba(10,14,26,0.5)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + plotH * i / 5;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    const x = pad.left + plotW * i / 5;
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + plotH); ctx.stroke();
+  }
+
+  // Axis labels
+  ctx.fillStyle = '#64748b'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    ctx.fillText((yMax - rangeY * i / 5).toFixed(2), pad.left - 6, pad.top + plotH * i / 5 + 4);
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 5; i++) {
+    ctx.fillText((tMin + rangeT * i / 5).toFixed(2), pad.left + plotW * i / 5, H - pad.bottom + 16);
+  }
+
+  // Campo director (flechas cortas)
+  if (result.campoDirector) {
+    const maxSlope = Math.max(...result.campoDirector.map(d => Math.abs(d.slope)));
+    const arrowLen = Math.min(plotW, plotH) / 20;
+    ctx.strokeStyle = 'rgba(100,116,139,0.35)'; ctx.lineWidth = 1;
+    result.campoDirector.forEach(({ t, y, slope }) => {
+      const angle = Math.atan(slope * (plotH / rangeY) / (plotW / rangeT));
+      const cx = toX(t), cy = toY(y);
+      const dx = Math.cos(angle) * arrowLen / 2;
+      const dy = Math.sin(angle) * arrowLen / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - dx, cy + dy);
+      ctx.lineTo(cx + dx, cy - dy);
+      ctx.stroke();
+    });
+  }
+
+  // Draw curves
+  function drawCurve(pts, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const cx = toX(p.x ?? p.t), cy = toY(p.y);
+      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    });
+    ctx.stroke();
+    // Dots
+    pts.forEach(p => {
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(toX(p.x ?? p.t), toY(p.y), 3, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  if (result.isComparacion) {
+    drawCurve(result.euler, '#f97316');
+    drawCurve(result.heun,  '#22d3ee');
+    drawCurve(result.rk4,   '#a78bfa');
+    // Legend
+    const lx = pad.left;
+    [[' Euler', '#f97316'], [' Heun', '#22d3ee'], [' RK4', '#a78bfa']].forEach(([label, color], i) => {
+      ctx.fillStyle = color; ctx.fillRect(lx + i * 80, 8, 12, 12);
+      ctx.fillStyle = '#94a3b8'; ctx.font = '11px Inter'; ctx.textAlign = 'left';
+      ctx.fillText(label, lx + i * 80 + 16, 18);
+    });
+  } else {
+    const color = result.metodoEDO === 'Euler' ? '#f97316' : result.metodoEDO === 'Heun' ? '#22d3ee' : '#a78bfa';
+    drawCurve(result.graphPoints, color);
+  }
+
+  // Title
+  ctx.fillStyle = '#f1f5f9'; ctx.font = 'bold 13px Inter'; ctx.textAlign = 'left';
+  ctx.fillText(result.campoDirector ? `${result.metodoEDO} + Campo Director` : result.metodoEDO, pad.left, result.campoDirector ? 36 : 18);
+}
+
+function drawRechazoChart(ctx, W, H, pad, plotW, plotH, result) {
+  const { scatterF, scatterG, scatterDentro, scatterFuera, a, b, yMin, yMax } = result;
+
+  const rangeX = b - a || 1;
+  const rangeY = yMax - yMin || 1;
+
+  const toX = (x) => pad.left + plotW * (x - a) / rangeX;
+  const toY = (y) => pad.top + plotH * (1 - (y - yMin) / rangeY);
+
+  // Background
+  ctx.fillStyle = 'rgba(10, 14, 26, 0.5)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + plotH * i / 5;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    const x = pad.left + plotW * i / 5;
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + plotH); ctx.stroke();
+  }
+
+  // Axis labels
+  ctx.fillStyle = '#64748b'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + plotH * i / 5;
+    ctx.fillText((yMax - rangeY * i / 5).toFixed(2), pad.left - 6, y + 4);
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 5; i++) {
+    const x = pad.left + plotW * i / 5;
+    ctx.fillText((a + rangeX * i / 5).toFixed(2), x, H - pad.bottom + 16);
+  }
+
+  // Scatter — fuera (grey)
+  ctx.fillStyle = 'rgba(100,116,139,0.25)';
+  scatterFuera.forEach(p => {
+    ctx.beginPath(); ctx.arc(toX(p.x), toY(p.y), 2, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Scatter — dentro (cyan)
+  ctx.fillStyle = 'rgba(34,211,238,0.45)';
+  scatterDentro.forEach(p => {
+    ctx.beginPath(); ctx.arc(toX(p.x), toY(p.y), 2, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // Curve f(x) — purple
+  ctx.strokeStyle = '#8b5cf6'; ctx.lineWidth = 2.5; ctx.beginPath();
+  scatterF.forEach((p, i) => {
+    const cx = toX(p.x), cy = toY(p.y);
+    if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+  });
+  ctx.stroke();
+
+  // Curve g(x) — orange
+  ctx.strokeStyle = '#f97316'; ctx.lineWidth = 2.5; ctx.beginPath();
+  scatterG.forEach((p, i) => {
+    const cx = toX(p.x), cy = toY(p.y);
+    if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+  });
+  ctx.stroke();
+
+  // Title
+  ctx.fillStyle = '#f1f5f9'; ctx.font = 'bold 13px Inter'; ctx.textAlign = 'left';
+  ctx.fillText(`Monte Carlo - Rechazo  Área ≈ ${result.integral.toFixed(6)}`, pad.left, 18);
+
+  // Legend
+  const lx = W - pad.right - 160;
+  ctx.fillStyle = '#8b5cf6'; ctx.fillRect(lx, 8, 10, 10);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '11px Inter'; ctx.textAlign = 'left';
+  ctx.fillText('f(x)', lx + 14, 17);
+  ctx.fillStyle = '#f97316'; ctx.fillRect(lx + 45, 8, 10, 10);
+  ctx.fillText('g(x)', lx + 59, 17);
+  ctx.fillStyle = 'rgba(34,211,238,0.7)'; ctx.beginPath(); ctx.arc(lx + 100, 13, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#94a3b8'; ctx.fillText('dentro', lx + 108, 17);
 }
 
 // --- Helpers ---
