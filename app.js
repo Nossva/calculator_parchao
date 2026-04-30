@@ -238,6 +238,110 @@ function aceleracionAitken(gExpr, x0, tol, maxIter) {
 // ============================================
 // 5. INTERPOLACIÓN DE LAGRANGE
 // ============================================
+
+// Multiplies two coefficient arrays (polynomial multiplication)
+function polyMul(a, b) {
+  const result = new Array(a.length + b.length - 1).fill(0);
+  for (let i = 0; i < a.length; i++)
+    for (let j = 0; j < b.length; j++)
+      result[i + j] += a[i] * b[j];
+  return result;
+}
+
+// Returns the coefficients [c0, c1, c2, ...] of the Lagrange polynomial
+// where P(x) = c0 + c1*x + c2*x^2 + ...
+function lagrangeCoeficients(xPuntos, yPuntos) {
+  const n = xPuntos.length;
+  let poly = new Array(n).fill(0);
+
+  for (let i = 0; i < n; i++) {
+    // Build numerator polynomial for L_i: product of (x - x_j) for j != i
+    let num = [1];
+    let den = 1;
+    for (let j = 0; j < n; j++) {
+      if (i !== j) {
+        num = polyMul(num, [-xPuntos[j], 1]); // (x - x_j)
+        den *= (xPuntos[i] - xPuntos[j]);
+      }
+    }
+    for (let k = 0; k < poly.length; k++)
+      poly[k] += yPuntos[i] * (num[k] || 0) / den;
+  }
+  return poly;
+}
+
+// Formats a coefficient array as a readable polynomial string
+// Converts a decimal to a fraction string like "7/6" using the Stern-Brocot / Euclidean approach
+function toFraction(value, maxDen = 10000) {
+  if (Math.abs(value) < 1e-9) return '0';
+  const negative = value < 0;
+  let x = Math.abs(value);
+
+  // Find best rational approximation via continued fractions
+  let bestNum = 1, bestDen = 1, bestErr = Infinity;
+  let h1 = 1, h2 = 0, k1 = 0, k2 = 1;
+  let rem = x;
+  for (let i = 0; i < 50; i++) {
+    const a = Math.floor(rem);
+    const h = a * h1 + h2;
+    const k = a * k1 + k2;
+    if (k > maxDen) break;
+    const err = Math.abs(x - h / k);
+    if (err < bestErr) { bestErr = err; bestNum = h; bestDen = k; }
+    if (err < 1e-9) break;
+    h2 = h1; h1 = h;
+    k2 = k1; k1 = k;
+    rem = 1 / (rem - a);
+    if (!isFinite(rem)) break;
+  }
+
+  const sign = negative ? '-' : '';
+  if (bestDen === 1) return `${sign}${bestNum}`;
+  return `${sign}${bestNum}/${bestDen}`;
+}
+
+function formatPolinomioFracciones(coefs) {
+  const terms = [];
+  for (let i = coefs.length - 1; i >= 0; i--) {
+    const c = parseFloat(coefs[i].toFixed(9));
+    if (Math.abs(c) < 1e-9) continue;
+
+    const cAbs = Math.abs(c);
+    const frac = toFraction(cAbs);
+    const sign = c < 0 ? ' - ' : (terms.length > 0 ? ' + ' : '');
+    // If coefficient is 1 and there's a variable part, omit the "1"
+    const cStr = (frac === '1' && i > 0) ? '' : frac;
+
+    let term;
+    if (i === 0) term = frac;
+    else if (i === 1) term = `${cStr}x`;
+    else term = `${cStr}x^${i}`;
+
+    terms.push(`${sign}${term}`);
+  }
+  return terms.length ? terms.join('') : '0';
+}
+
+function formatPolinomio(coefs) {
+  const terms = [];
+  for (let i = coefs.length - 1; i >= 0; i--) {
+    const c = parseFloat(coefs[i].toFixed(6));
+    if (Math.abs(c) < 1e-9) continue;
+
+    const cAbs = Math.abs(c);
+    const sign = c < 0 ? ' - ' : (terms.length > 0 ? ' + ' : '');
+    const cStr = cAbs === 1 && i > 0 ? '' : String(parseFloat(cAbs.toFixed(6)));
+
+    let term;
+    if (i === 0) term = String(parseFloat(cAbs.toFixed(6)));
+    else if (i === 1) term = `${cStr}x`;
+    else term = `${cStr}x^${i}`;
+
+    terms.push(`${sign}${term}`);
+  }
+  return terms.length ? terms.join('') : '0';
+}
+
 function interpolacionLagrange(xPuntos, yPuntos, xEval) {
   const n = xPuntos.length;
 
@@ -300,11 +404,17 @@ function interpolacionLagrange(xPuntos, yPuntos, xEval) {
     graphPoints.push({ x: xv, y: yv });
   }
 
+  const coefs = lagrangeCoeficients(xPuntos, yPuntos);
+  const polinomio = formatPolinomio(coefs);
+  const polinomioFracciones = formatPolinomioFracciones(coefs);
+
   return {
     convergio: true,
     resultado,
     xEval,
     grado: n - 1,
+    polinomio,
+    polinomioFracciones,
     historial,
     graphPoints,
     dataPuntos: xPuntos.map((x, i) => ({ x, y: yPuntos[i] })),
@@ -850,8 +960,8 @@ function renderLagrangeForm(container) {
   grid.innerHTML = `
     <div class="form-group">
       <label for="field-x_eval">Evaluar en x =</label>
-      <input type="number" id="field-x_eval" placeholder="${(Math.PI / 4).toFixed(6)}" step="any">
-      <span class="input-hint">Punto donde evaluar P(x)</span>
+      <input type="text" id="field-x_eval" placeholder="pi/4">
+      <span class="input-hint">Acepta: pi, e, pi/2, 2*pi, etc.</span>
     </div>
   `;
   container.appendChild(grid);
@@ -863,8 +973,8 @@ function createPointRow(index, xVal, yVal) {
   row.dataset.index = index;
   row.innerHTML = `
     <span class="point-label">${index + 1}.</span>
-    <input type="number" class="lagrange-x" placeholder="x" value="${xVal}" step="any">
-    <input type="number" class="lagrange-y" placeholder="y" value="${yVal}" step="any">
+    <input type="text" class="lagrange-x" placeholder="x (ej: pi/2)" value="${xVal}">
+    <input type="text" class="lagrange-y" placeholder="y (ej: 1)" value="${yVal}">
     <button class="remove-point-btn" title="Eliminar punto">×</button>
   `;
 
@@ -889,6 +999,21 @@ function rerenderLagrangePoints() {
   });
 }
 
+// Parses a value string that may contain pi, e, and basic arithmetic
+function parseMathVal(str) {
+  if (str === null || str === undefined || str.toString().trim() === '') return NaN;
+  const sanitized = str.toString().trim()
+    .replace(/pi/gi, String(Math.PI))
+    .replace(/(?<![a-zA-Z\d])e(?![a-zA-Z\d])/g, String(Math.E))
+    .replace(/\^/g, '**');
+  try {
+    const result = Function('"use strict"; return (' + sanitized + ')')();
+    return typeof result === 'number' ? result : NaN;
+  } catch {
+    return NaN;
+  }
+}
+
 // --- Execute Method ---
 function ejecutar() {
   const method = METHODS[currentMethod];
@@ -897,10 +1022,10 @@ function ejecutar() {
   try {
     if (method.isLagrange) {
       // Collect Lagrange points
-      const xPuntos = lagrangePoints.map(p => parseFloat(p.x));
-      const yPuntos = lagrangePoints.map(p => parseFloat(p.y));
+      const xPuntos = lagrangePoints.map(p => parseMathVal(p.x));
+      const yPuntos = lagrangePoints.map(p => parseMathVal(p.y));
       const xEvalField = $('#field-x_eval');
-      const xEval = xEvalField && xEvalField.value ? parseFloat(xEvalField.value) : null;
+      const xEval = xEvalField && xEvalField.value ? parseMathVal(xEvalField.value) : null;
 
       if (xPuntos.some(isNaN) || yPuntos.some(isNaN)) {
         showError('Todos los puntos deben tener valores numéricos válidos.');
@@ -989,6 +1114,19 @@ function displayResults(result) {
     if (result.xEval !== null && result.xEval !== undefined) {
       addSummaryItem(summaryGrid, `P(${fmt(result.xEval)})`, fmt(result.resultado), true);
     }
+    if (result.polinomio) {
+      document.querySelectorAll('.poly-display').forEach(el => el.remove());
+      const polyCard = document.createElement('div');
+      polyCard.className = 'poly-display';
+      const fracLine = result.polinomioFracciones && result.polinomioFracciones !== result.polinomio
+        ? `<div class="poly-row"><span class="poly-label">P(x) =</span> <span class="poly-expr poly-frac">${result.polinomioFracciones}</span></div>`
+        : '';
+      polyCard.innerHTML = `
+        <div class="poly-row"><span class="poly-label">P(x) =</span> <span class="poly-expr">${result.polinomio}</span></div>
+        ${fracLine}
+      `;
+      summaryGrid.after(polyCard);
+    }
   } else {
     if (result.raiz !== null && result.raiz !== undefined) {
       addSummaryItem(summaryGrid, 'Raíz Aproximada', fmt(result.raiz), true);
@@ -1003,8 +1141,111 @@ function displayResults(result) {
   // Iteration table
   renderTable(result);
 
+  // Lagrange steps
+  if (isLagrange) {
+    renderLagrangeSteps(result);
+  } else {
+    $('#lagrange-steps-card').style.display = 'none';
+  }
+
   // Chart
   renderChart(result, isLagrange, isIntegration, isPiAproximation);
+}
+
+function renderLagrangeSteps(result) {
+  const card = $('#lagrange-steps-card');
+  const container = $('#lagrange-steps');
+  card.style.display = 'block';
+  container.innerHTML = '';
+
+  const xPts = result.dataPuntos.map(p => p.x);
+  const yPts = result.dataPuntos.map(p => p.y);
+  const n = xPts.length;
+
+  // Helper: format a number cleanly
+  const fc = (v) => parseFloat(v.toFixed(6)).toString();
+
+  let html = '';
+
+  // --- Step 1: show each L_i(x) symbolically ---
+  html += `<div class="step-section-title">Paso 1 — Bases de Lagrange L<sub>i</sub>(x)</div>`;
+
+  for (let i = 0; i < n; i++) {
+    // Numerator factors as string: (x - x_j)
+    const numFactors = xPts
+      .filter((_, j) => j !== i)
+      .map(xj => {
+        const sign = xj >= 0 ? ` - ${fc(xj)}` : ` + ${fc(Math.abs(xj))}`;
+        return `(x${sign})`;
+      })
+      .join(' · ');
+
+    // Denominator as string: product of (x_i - x_j)
+    const denFactors = xPts
+      .filter((_, j) => j !== i)
+      .map(xj => `(${fc(xPts[i])} - ${fc(xj)})`)
+      .join(' · ');
+
+    // Computed denominator value
+    let denVal = 1;
+    xPts.forEach((xj, j) => { if (j !== i) denVal *= (xPts[i] - xj); });
+
+    html += `
+      <div class="step-block">
+        <div class="step-label">L<sub>${i}</sub>(x)</div>
+        <div class="step-formula">
+          <div class="step-fraction">
+            <span class="step-num">${numFactors}</span>
+            <span class="step-bar"></span>
+            <span class="step-den">${denFactors} = ${fc(denVal)}</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // --- Step 2: write P(x) = sum of y_i * L_i(x) ---
+  html += `<div class="step-section-title" style="margin-top:24px">Paso 2 — Construcción de P(x)</div>`;
+
+  const terms = yPts.map((yi, i) => `${fc(yi)} · L<sub>${i}</sub>(x)`).join(' + ');
+  html += `<div class="step-block"><div class="step-formula-line">P(x) = ${terms}</div></div>`;
+
+  // --- Step 3: substitute L_i values and simplify ---
+  html += `<div class="step-section-title" style="margin-top:24px">Paso 3 — Simplificación</div>`;
+
+  // Show each non-zero contribution
+  const contribs = yPts
+    .map((yi, i) => ({ yi, i }))
+    .filter(({ yi }) => Math.abs(yi) > 1e-9);
+
+  if (contribs.length === 0) {
+    html += `<div class="step-block"><div class="step-formula-line">P(x) = 0 (todos los y<sub>i</sub> son cero)</div></div>`;
+  } else {
+    const contribStr = contribs
+      .map(({ yi, i }) => `${fc(yi)} · L<sub>${i}</sub>(x)`)
+      .join(' + ');
+    html += `<div class="step-block"><div class="step-formula-line">P(x) = ${contribStr}</div></div>`;
+  }
+
+  // --- Step 4: final polynomial ---
+  html += `<div class="step-section-title" style="margin-top:24px">Paso 4 — Polinomio resultante</div>`;
+  html += `<div class="step-block step-result">
+    <div class="step-formula-line">P(x) = <span class="step-poly">${result.polinomio}</span></div>
+  </div>`;
+
+  // --- Step 5: evaluation at xEval (if provided) ---
+  if (result.xEval !== null && result.xEval !== undefined) {
+    html += `<div class="step-section-title" style="margin-top:24px">Paso 5 — Evaluación en x = ${fc(result.xEval)}</div>`;
+    const evalTerms = yPts.map((yi, i) => {
+      const h = result.historial[i];
+      return `${fc(yi)} · ${h.Li_val !== null ? fc(h.Li_val) : '?'}`;
+    }).join(' + ');
+    html += `<div class="step-block">
+      <div class="step-formula-line">P(${fc(result.xEval)}) = ${evalTerms}</div>
+      <div class="step-formula-line step-result-val">= <span class="step-poly">${fc(result.resultado)}</span></div>
+    </div>`;
+  }
+
+  container.innerHTML = html;
 }
 
 function addSummaryItem(container, label, value, highlight) {

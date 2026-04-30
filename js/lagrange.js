@@ -3,6 +3,49 @@
 // Construye un polinomio que pasa por todos los puntos dados.
 // ===================================================
 
+function polyMul(a, b) {
+  const result = new Array(a.length + b.length - 1).fill(0);
+  for (let i = 0; i < a.length; i++)
+    for (let j = 0; j < b.length; j++)
+      result[i + j] += a[i] * b[j];
+  return result;
+}
+
+function lagrangeCoeficients(xPuntos, yPuntos) {
+  const n = xPuntos.length;
+  let poly = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    let num = [1];
+    let den = 1;
+    for (let j = 0; j < n; j++) {
+      if (i !== j) {
+        num = polyMul(num, [-xPuntos[j], 1]);
+        den *= (xPuntos[i] - xPuntos[j]);
+      }
+    }
+    for (let k = 0; k < poly.length; k++)
+      poly[k] += yPuntos[i] * (num[k] || 0) / den;
+  }
+  return poly;
+}
+
+function formatPolinomio(coefs) {
+  const terms = [];
+  for (let i = coefs.length - 1; i >= 0; i--) {
+    const c = parseFloat(coefs[i].toFixed(6));
+    if (Math.abs(c) < 1e-9) continue;
+    const cAbs = Math.abs(c);
+    const sign = c < 0 ? ' - ' : (terms.length > 0 ? ' + ' : '');
+    const cStr = cAbs === 1 && i > 0 ? '' : String(parseFloat(cAbs.toFixed(6)));
+    let term;
+    if (i === 0) term = String(parseFloat(cAbs.toFixed(6)));
+    else if (i === 1) term = `${cStr}x`;
+    else term = `${cStr}x^${i}`;
+    terms.push(`${sign}${term}`);
+  }
+  return terms.length ? terms.join('') : '0';
+}
+
 function interpolacionLagrange(xPuntos, yPuntos, xEval) {
   const n = xPuntos.length;
 
@@ -65,11 +108,15 @@ function interpolacionLagrange(xPuntos, yPuntos, xEval) {
     graphPoints.push({ x: xv, y: yv });
   }
 
+  const coefs = lagrangeCoeficients(xPuntos, yPuntos);
+  const polinomio = formatPolinomio(coefs);
+
   return {
     convergio: true,
     resultado,
     xEval,
     grado: n - 1,
+    polinomio,
     historial,
     graphPoints,
     dataPuntos: xPuntos.map((x, i) => ({ x, y: yPuntos[i] })),
