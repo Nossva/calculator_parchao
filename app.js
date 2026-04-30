@@ -977,6 +977,34 @@ function monteCarloConfianza(fExpr, a, b, confianza, errorMax) {
   };
 }
 
+// Calcula la integral por Monte Carlo con n fijo y devuelve IC usando las mismas muestras
+function monteCarloIC(fExpr, a, b, n, confianza) {
+  // validar inputs
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return { error: true, message: 'a y b deben ser numeros validos' };
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return { error: true, message: 'n debe ser un entero positivo' };
+
+  // Obtener estimación y estadísticas usando metodo existente
+  const res = metodoMonteCarloIntegracion(fExpr, a, b, n);
+  if (res.error) return res;
+
+  const desv = res.estadisticas && res.estadisticas.desvStd ? res.estadisticas.desvStd : null;
+  if (desv === null) return { error: true, message: 'No se pudo calcular la desviación muestral' };
+
+  // Normalizar confianza: aceptar 0.95 o 95
+  let confPerc = confianza;
+  if (confPerc <= 1) confPerc = confPerc * 100;
+  const zMap = { 90: 1.645, 95: 1.960, 99: 2.576, 99.7: 3.000 };
+  const z = zMap[confPerc] || 1.96;
+
+  const long = b - a;
+  const errorEst = z * long * desv / Math.sqrt(n);
+  const ic_inf = res.integral - errorEst;
+  const ic_sup = res.integral + errorEst;
+
+  res.ic = { inf: ic_inf, sup: ic_sup, z, confianza: confPerc, errorEst };
+  return res;
+}
+
 // ============================================
 // MONTE CARLO INTEGRAL DOBLE
 // ∬ f(x,y) dy dx  con x ∈ [ax,bx], y ∈ [ay,by]
@@ -1049,6 +1077,84 @@ function monteCarloDoble(fExpr, ax, bx, ay, by, n) {
     intervalo: { a: ax, b: bx },
     desvStd, errorEst,
     graphPoints,
+    historial,
+    columns: ['Concepto', 'Valor'],
+    getRow: (h) => [h.concepto, h.valor]
+  };
+}
+
+// Monte Carlo doble con n fijo que devuelve IC usando la desviación muestral
+function monteCarloDobleIC(fExpr, ax, bx, ay, by, n, confianza) {
+  if (!Number.isFinite(ax) || !Number.isFinite(bx) || !Number.isFinite(ay) || !Number.isFinite(by)) return { error: true, message: 'Límites inválidos' };
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return { error: true, message: 'n debe ser entero positivo' };
+
+  // Compilar f(x,y)
+  let sanitized = fExpr
+    .replace(/\^/g, '**')
+    .replace(/sqrt\(/gi, 'Math.sqrt(')
+    .replace(/cbrt\(/gi, 'Math.cbrt(')
+    .replace(/sin\(/gi, 'Math.sin(')
+    .replace(/sen\(/gi, 'Math.sin(')
+    .replace(/cos\(/gi, 'Math.cos(')
+    .replace(/tan\(/gi, 'Math.tan(')
+    .replace(/exp\(/gi, 'Math.exp(')
+    .replace(/log\(/gi, 'Math.log(')
+    .replace(/ln\(/gi, 'Math.log(')
+    .replace(/abs\(/gi, 'Math.abs(')
+    .replace(/pi/gi, String(Math.PI))
+    .replace(/(?<![a-zA-Z\d\.])e(?![a-zA-Z\d\(])/g, String(Math.E));
+
+  let f;
+  try { f = new Function('x', 'y', `"use strict"; return (${sanitized});`); }
+  catch (e) { return { error: true, message: 'Expresión inválida para f(x,y)' }; }
+
+  const vals = [];
+  for (let i = 0; i < n; i++) {
+    const x = ax + Math.random() * (bx - ax);
+    const y = ay + Math.random() * (by - ay);
+    const v = f(x, y);
+    if (!isFinite(v)) continue;
+    vals.push(v);
+  }
+  if (vals.length === 0) return { error: true, message: 'No se obtuvieron valores válidos de f en la muestra' };
+
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const varr = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length;
+  const s = Math.sqrt(varr);
+  const area = (bx - ax) * (by - ay);
+  const integral = area * mean;
+
+  let confPerc = confianza;
+  if (confPerc <= 1) confPerc = confPerc * 100;
+  const zMap = { 90: 1.645, 95: 1.960, 99: 2.576, 99.7: 3.000 };
+  const z = zMap[confPerc] || 1.96;
+
+  const errorEst = z * area * s / Math.sqrt(vals.length);
+  const ic_inf = integral - errorEst;
+  const ic_sup = integral + errorEst;
+
+  const historial = [
+    { concepto: 'n muestras', valor: vals.length },
+    { concepto: 'Área dominio', valor: area.toFixed(6) },
+    { concepto: 'Media f(x,y)', valor: mean.toFixed(8) },
+    { concepto: 'Integral ≈', valor: integral.toFixed(8) },
+    { concepto: 'Desv. estándar', valor: s.toFixed(8) },
+    { concepto: 'IC inferior', valor: ic_inf.toFixed(8) },
+    { concepto: 'IC superior', valor: ic_sup.toFixed(8) },
+  ];
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    isDoble: true,
+    metodoIntegracion: 'Monte Carlo Doble',
+    integral,
+    area,
+    nMuestras: vals.length,
+    a: ax, b: bx,
+    intervalo: { ax, bx, ay, by },
+    desvStd: s,
+    ic: { inf: ic_inf, sup: ic_sup, z, confianza: confPerc, errorEst },
     historial,
     columns: ['Concepto', 'Valor'],
     getRow: (h) => [h.concepto, h.valor]
@@ -1587,25 +1693,64 @@ const METHODS = {
     description: 'Integración con intervalo de confianza y n automático.',
     fields: [
       { id: 'f_expr', label: 'Función f(x)', placeholder: 'exp(-x^2)', hint: 'Función a integrar', fullWidth: true },
-      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'number' },
-      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
+      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
+      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
+      { id: 'n_muestras', label: 'Número de muestras (opcional)', placeholder: 'Dejar vacío para calcular n', type: 'number', hint: 'Si se especifica, se usará este n en lugar de calcularlo' },
       { id: 'confianza', label: 'Confianza (%)', placeholder: '95', hint: '90 / 95 / 99 / 99.7', type: 'number' },
       { id: 'error_max', label: 'Error máximo', placeholder: '0.01', type: 'number' },
     ],
-    run: (v) => monteCarloConfianza(v.f_expr, parseFloat(v.a), parseFloat(v.b), parseFloat(v.confianza), parseFloat(v.error_max))
+    run: (v) => {
+      const aVal = parseMathVal(v.a);
+      const bVal = parseMathVal(v.b);
+      if (isNaN(aVal) || isNaN(bVal)) return { error: true, message: 'Límites inválidos. Usa números o expresiones como pi, sqrt(...)' };
+      const confianza = parseFloat(v.confianza);
+      const errorMax = parseFloat(v.error_max);
+      const nProvided = v.n_muestras ? parseInt(v.n_muestras) : 0;
+
+      if (nProvided && nProvided > 0) {
+        // Usar n fijo y calcular IC a partir de la desviación muestral
+        const res = metodoMonteCarloIntegracion(v.f_expr, aVal, bVal, nProvided);
+        if (res.error) return res;
+        const zMap = { 90: 1.645, 95: 1.960, 99: 2.576, 99.7: 3.000 };
+        const z = zMap[confianza] || 1.960;
+        const n = nProvided;
+        const long = bVal - aVal;
+        const desv = res.estadisticas && res.estadisticas.desvStd ? res.estadisticas.desvStd : 0;
+        const errorEst = long * desv / Math.sqrt(n);
+        res.ic = { inf: res.integral - z * errorEst, sup: res.integral + z * errorEst, z, confianza, errorEst };
+        res.nCalculado = n;
+        return res;
+      }
+
+      // Si no se provee n, calcularlo automáticamente usando la función existente
+      return monteCarloConfianza(v.f_expr, aVal, bVal, confianza, errorMax);
+    }
   },
   monte_carlo_doble: {
     name: 'Monte Carlo - Integral Doble',
     description: 'Estima ∬ f(x,y) dy dx usando muestreo aleatorio.',
     fields: [
       { id: 'f_expr', label: 'Función f(x,y)', placeholder: 'exp(x+y)', hint: 'Usa x e y como variables', fullWidth: true },
-      { id: 'ax', label: 'x mínimo', placeholder: '0', type: 'number' },
-      { id: 'bx', label: 'x máximo', placeholder: '2', type: 'number' },
-      { id: 'ay', label: 'y mínimo', placeholder: '1', type: 'number' },
-      { id: 'by', label: 'y máximo', placeholder: '3', type: 'number' },
-      { id: 'n_muestras', label: 'Muestras (n)', placeholder: '50000', type: 'number' },
+      { id: 'ax', label: 'x mínimo (ax)', placeholder: '0', type: 'text', hint: 'Acepta: pi, sqrt(2), 1/2, etc.' },
+      { id: 'bx', label: 'x máximo (bx)', placeholder: '2', type: 'text', hint: 'Acepta: pi, sqrt(2), 1/2, etc.' },
+      { id: 'ay', label: 'y mínimo (ay)', placeholder: '1', type: 'text', hint: 'Acepta: pi, sqrt(2), 1/2, etc.' },
+      { id: 'by', label: 'y máximo (by)', placeholder: '3', type: 'text', hint: 'Acepta: pi, sqrt(2), 1/2, etc.' },
+      { id: 'n_muestras', label: 'Muestras (n) — opcional', placeholder: '50000', type: 'number', hint: 'Si se deja vacío, la función usa n proporcionado o una estimación previa' },
+      { id: 'confianza', label: 'Confianza (%) — opcional', placeholder: '95', type: 'number', hint: 'Usado solo si se provee n para calcular IC' },
     ],
-    run: (v) => monteCarloDoble(v.f_expr, parseFloat(v.ax), parseFloat(v.bx), parseFloat(v.ay), parseFloat(v.by), parseInt(v.n_muestras))
+    run: (v) => {
+      const axVal = parseMathVal(v.ax);
+      const bxVal = parseMathVal(v.bx);
+      const ayVal = parseMathVal(v.ay);
+      const byVal = parseMathVal(v.by);
+      if ([axVal, bxVal, ayVal, byVal].some(x => isNaN(x))) return { error: true, message: 'Límites inválidos. Usa números o expresiones como pi, sqrt(...)' };
+      const nProvided = v.n_muestras ? parseInt(v.n_muestras) : 0;
+      const confianza = v.confianza ? parseFloat(v.confianza) : 95;
+      if (nProvided && nProvided > 0) {
+        return monteCarloDobleIC(v.f_expr, axVal, bxVal, ayVal, byVal, nProvided, confianza);
+      }
+      return monteCarloDoble(v.f_expr, axVal, bxVal, ayVal, byVal, parseInt(v.n_muestras));
+    }
   },
   monte_carlo_rechazo: {
     name: 'Monte Carlo - Rechazo',
