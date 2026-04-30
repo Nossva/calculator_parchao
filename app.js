@@ -961,7 +961,7 @@ function renderLagrangeForm(container) {
     <div class="form-group">
       <label for="field-x_eval">Evaluar en x =</label>
       <input type="text" id="field-x_eval" placeholder="pi/4">
-      <span class="input-hint">Acepta: pi, e, pi/2, 2*pi, etc.</span>
+      <span class="input-hint">Acepta: pi, e, sqrt(), cbrt(), sin(), cos(), ^, etc.</span>
     </div>
   `;
   container.appendChild(grid);
@@ -999,13 +999,24 @@ function rerenderLagrangePoints() {
   });
 }
 
-// Parses a value string that may contain pi, e, and basic arithmetic
+// Parses a value string that may contain pi, e, and math functions
 function parseMathVal(str) {
   if (str === null || str === undefined || str.toString().trim() === '') return NaN;
   const sanitized = str.toString().trim()
+    .replace(/\^/g, '**')
+    .replace(/sqrt\(/gi, 'Math.sqrt(')
+    .replace(/cbrt\(/gi, 'Math.cbrt(')
+    .replace(/sin\(/gi, 'Math.sin(')
+    .replace(/sen\(/gi, 'Math.sin(')
+    .replace(/cos\(/gi, 'Math.cos(')
+    .replace(/tan\(/gi, 'Math.tan(')
+    .replace(/log\(/gi, 'Math.log(')
+    .replace(/ln\(/gi, 'Math.log(')
+    .replace(/log10\(/gi, 'Math.log10(')
+    .replace(/abs\(/gi, 'Math.abs(')
+    .replace(/exp\(/gi, 'Math.exp(')
     .replace(/pi/gi, String(Math.PI))
-    .replace(/(?<![a-zA-Z\d])e(?![a-zA-Z\d])/g, String(Math.E))
-    .replace(/\^/g, '**');
+    .replace(/(?<![a-zA-Z\d\.])e(?![a-zA-Z\d\(])/g, String(Math.E));
   try {
     const result = Function('"use strict"; return (' + sanitized + ')')();
     return typeof result === 'number' ? result : NaN;
