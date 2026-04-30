@@ -765,8 +765,9 @@ function metodoSimpson38(fExpr, a, b, n) {
 // ============================================
 // MÉTODO DE MONTE CARLO
 // ============================================
-function metodoMonteCarloIntegracion(fExpr, a, b, nMuestras) {
+function metodoMonteCarloIntegracion(fExpr, a, b, nMuestras, seed = null) {
   const f = parseMathExpr(fExpr);
+  const rng = crearRNG(seed);
 
   if (!Number.isFinite(a) || !Number.isFinite(b)) {
     return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
@@ -782,9 +783,9 @@ function metodoMonteCarloIntegracion(fExpr, a, b, nMuestras) {
   // Generar puntos aleatorios en el intervalo [a, b]
   const xAleatorios = [];
   const fValores = [];
-  
+
   for (let i = 0; i < nMuestras; i++) {
-    const x = a + Math.random() * (b - a);
+    const x = a + rng() * (b - a);
     const fx = f(x);
     xAleatorios.push(x);
     fValores.push(fx);
@@ -903,11 +904,28 @@ function aproximarPi(nPuntos) {
 }
 
 // ============================================
+// GENERADOR PSEUDOALEATORIO CON SEMILLA (Mulberry32)
+// Reproducible dentro de JS. No es idéntico a NumPy.
+// ============================================
+function crearRNG(seed) {
+  if (seed === null || seed === undefined || isNaN(seed)) return () => Math.random();
+  let s = (seed >>> 0) + 1;
+  return function() {
+    s += 0x6D2B79F5;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ============================================
 // MONTE CARLO CON INTERVALO DE CONFIANZA
 // Calcula n automáticamente dado z y error máximo, luego integra
 // ============================================
-function monteCarloConfianza(fExpr, a, b, confianza, errorMax) {
+function monteCarloConfianza(fExpr, a, b, confianza, errorMax, seed = null) {
   const f = parseMathExpr(fExpr);
+  const rng = crearRNG(seed);
 
   // z values for common confidence levels
   const zMap = { 90: 1.645, 95: 1.960, 99: 2.576, 99.7: 3.000 };
@@ -917,21 +935,20 @@ function monteCarloConfianza(fExpr, a, b, confianza, errorMax) {
   const nPiloto = 1000;
   const piloto = [];
   for (let i = 0; i < nPiloto; i++) {
-    const x = a + Math.random() * (b - a);
+    const x = a + rng() * (b - a);
     piloto.push(f(x));
   }
   const meanP = piloto.reduce((s, v) => s + v, 0) / nPiloto;
   const varP = piloto.reduce((s, v) => s + (v - meanP) ** 2, 0) / nPiloto;
-  const sigmaF = Math.sqrt(varP);           // desv. estándar de f(x)
-  const sigmaP = sigmaF * (b - a);          // desv. estándar de la integral = σ_f · (b-a)
+  const sigmaF = Math.sqrt(varP);
+  const sigmaP = sigmaF * (b - a);
 
-  // n = ( z · σ_f · (b-a) / errorMax )²
   const nCalculado = Math.ceil((z * sigmaP / errorMax) ** 2);
   const n = Math.max(nCalculado, 1000);
 
   const fValores = [];
   for (let i = 0; i < n; i++) {
-    const x = a + Math.random() * (b - a);
+    const x = a + rng() * (b - a);
     fValores.push(f(x));
   }
 
@@ -1010,7 +1027,7 @@ function monteCarloIC(fExpr, a, b, n, confianza) {
 // MONTE CARLO INTEGRAL DOBLE
 // ∬ f(x,y) dy dx  con x ∈ [ax,bx], y ∈ [ay,by]
 // ============================================
-function monteCarloDoble(fExpr, ax, bx, ay, by, n) {
+function monteCarloDoble(fExpr, ax, bx, ay, by, n, seed = null) {
   // f must depend on x and y — we compile as function(x,y)
   let sanitized = fExpr
     .replace(/\^/g, '**')
@@ -1034,11 +1051,12 @@ function monteCarloDoble(fExpr, ax, bx, ay, by, n) {
     return { error: true, message: 'Expresión inválida para integral doble. Usa x e y como variables.' };
   }
 
+  const rng = crearRNG(seed);
   const area = (bx - ax) * (by - ay);
   const fValores = [];
   for (let i = 0; i < n; i++) {
-    const x = ax + Math.random() * (bx - ax);
-    const y = ay + Math.random() * (by - ay);
+    const x = ax + rng() * (bx - ax);
+    const y = ay + rng() * (by - ay);
     const val = f(x, y);
     if (!isFinite(val)) continue;
     fValores.push(val);
@@ -1085,7 +1103,7 @@ function monteCarloDoble(fExpr, ax, bx, ay, by, n) {
 }
 
 // Monte Carlo doble con n fijo que devuelve IC usando la desviación muestral
-function monteCarloDobleIC(fExpr, ax, bx, ay, by, n, confianza) {
+function monteCarloDobleIC(fExpr, ax, bx, ay, by, n, confianza, seed = null) {
   if (!Number.isFinite(ax) || !Number.isFinite(bx) || !Number.isFinite(ay) || !Number.isFinite(by)) return { error: true, message: 'Límites inválidos' };
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) return { error: true, message: 'n debe ser entero positivo' };
 
@@ -1109,10 +1127,11 @@ function monteCarloDobleIC(fExpr, ax, bx, ay, by, n, confianza) {
   try { f = new Function('x', 'y', `"use strict"; return (${sanitized});`); }
   catch (e) { return { error: true, message: 'Expresión inválida para f(x,y)' }; }
 
+  const rng = crearRNG(seed);
   const vals = [];
   for (let i = 0; i < n; i++) {
-    const x = ax + Math.random() * (bx - ax);
-    const y = ay + Math.random() * (by - ay);
+    const x = ax + rng() * (bx - ax);
+    const y = ay + rng() * (by - ay);
     const v = f(x, y);
     if (!isFinite(v)) continue;
     vals.push(v);
@@ -1686,8 +1705,12 @@ const METHODS = {
       { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
       { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
       { id: 'n_muestras', label: 'Número de muestras', placeholder: '10000', type: 'number' },
+      { id: 'seed', label: 'Semilla (opcional)', placeholder: 'Ej: 0, 42, 123', type: 'number', hint: 'Fija la semilla para reproducibilidad en JS' },
     ],
-    run: (v) => metodoMonteCarloIntegracion(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n_muestras))
+    run: (v) => {
+      const seed = v.seed !== '' && !isNaN(parseInt(v.seed)) ? parseInt(v.seed) : null;
+      return metodoMonteCarloIntegracion(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n_muestras), seed);
+    }
   },
   monte_carlo_ic: {
     name: 'Monte Carlo - IC',
@@ -1699,6 +1722,7 @@ const METHODS = {
       { id: 'n_muestras', label: 'Número de muestras (opcional)', placeholder: 'Dejar vacío para calcular n', type: 'number', hint: 'Si se especifica, se usará este n en lugar de calcularlo' },
       { id: 'confianza', label: 'Confianza (%)', placeholder: '95', hint: '90 / 95 / 99 / 99.7', type: 'number' },
       { id: 'error_max', label: 'Error máximo', placeholder: '0.01', type: 'number' },
+      { id: 'seed', label: 'Semilla (opcional)', placeholder: 'Ej: 0, 42, 123', type: 'number', hint: 'Fija la semilla para reproducibilidad en JS' },
     ],
     run: (v) => {
       const aVal = parseMathVal(v.a);
@@ -1707,24 +1731,22 @@ const METHODS = {
       const confianza = parseFloat(v.confianza);
       const errorMax = parseFloat(v.error_max);
       const nProvided = v.n_muestras ? parseInt(v.n_muestras) : 0;
+      const seed = v.seed !== '' && !isNaN(parseInt(v.seed)) ? parseInt(v.seed) : null;
 
       if (nProvided && nProvided > 0) {
-        // Usar n fijo y calcular IC a partir de la desviación muestral
-        const res = metodoMonteCarloIntegracion(v.f_expr, aVal, bVal, nProvided);
+        const res = metodoMonteCarloIntegracion(v.f_expr, aVal, bVal, nProvided, seed);
         if (res.error) return res;
         const zMap = { 90: 1.645, 95: 1.960, 99: 2.576, 99.7: 3.000 };
         const z = zMap[confianza] || 1.960;
-        const n = nProvided;
         const long = bVal - aVal;
         const desv = res.estadisticas && res.estadisticas.desvStd ? res.estadisticas.desvStd : 0;
-        const errorEst = long * desv / Math.sqrt(n);
+        const errorEst = long * desv / Math.sqrt(nProvided);
         res.ic = { inf: res.integral - z * errorEst, sup: res.integral + z * errorEst, z, confianza, errorEst };
-        res.nCalculado = n;
+        res.nCalculado = nProvided;
         return res;
       }
 
-      // Si no se provee n, calcularlo automáticamente usando la función existente
-      return monteCarloConfianza(v.f_expr, aVal, bVal, confianza, errorMax);
+      return monteCarloConfianza(v.f_expr, aVal, bVal, confianza, errorMax, seed);
     }
   },
   monte_carlo_doble: {
@@ -1738,6 +1760,7 @@ const METHODS = {
       { id: 'by', label: 'y máximo (by)', placeholder: '3', type: 'text', hint: 'Acepta: pi, sqrt(2), 1/2, etc.' },
       { id: 'n_muestras', label: 'Muestras (n) — opcional', placeholder: '50000', type: 'number', hint: 'Si se deja vacío, la función usa n proporcionado o una estimación previa' },
       { id: 'confianza', label: 'Confianza (%) — opcional', placeholder: '95', type: 'number', hint: 'Usado solo si se provee n para calcular IC' },
+      { id: 'seed', label: 'Semilla (opcional)', placeholder: 'Ej: 0, 42, 123', type: 'number', hint: 'Fija la semilla para reproducibilidad en JS' },
     ],
     run: (v) => {
       const axVal = parseMathVal(v.ax);
@@ -1747,10 +1770,11 @@ const METHODS = {
       if ([axVal, bxVal, ayVal, byVal].some(x => isNaN(x))) return { error: true, message: 'Límites inválidos. Usa números o expresiones como pi, sqrt(...)' };
       const nProvided = v.n_muestras ? parseInt(v.n_muestras) : 0;
       const confianza = v.confianza ? parseFloat(v.confianza) : 95;
+      const seed = v.seed !== '' && !isNaN(parseInt(v.seed)) ? parseInt(v.seed) : null;
       if (nProvided && nProvided > 0) {
-        return monteCarloDobleIC(v.f_expr, axVal, bxVal, ayVal, byVal, nProvided, confianza);
+        return monteCarloDobleIC(v.f_expr, axVal, bxVal, ayVal, byVal, nProvided, confianza, seed);
       }
-      return monteCarloDoble(v.f_expr, axVal, bxVal, ayVal, byVal, parseInt(v.n_muestras));
+      return monteCarloDoble(v.f_expr, axVal, bxVal, ayVal, byVal, parseInt(v.n_muestras), seed);
     }
   },
   monte_carlo_rechazo: {
