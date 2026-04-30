@@ -13,7 +13,7 @@ function parseMathExpr(expr) {
     .replace(/tan\(/gi, 'Math.tan(')
     .replace(/sin\(/gi, 'Math.sin(')
     .replace(/cbrt\(/gi, 'Math.cbrt(')
-    .replace(/sqrt\(/gi, 'Math.sqrt(')
+    .replace(/sqrt\(/gi, 'Math.sqrt(')  //raiz cubica
     .replace(/log\(/gi, 'Math.log(')
     .replace(/ln\(/gi, 'Math.log(')
     .replace(/log10\(/gi, 'Math.log10(')
@@ -462,6 +462,9 @@ function gaussLegendre5(f, a, b) {
 // ============================================
 function metodoTrapecio(fExpr, a, b, n) {
   const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
   if (n < 1) return { error: true, message: 'n debe ser al menos 1.' };
 
   const h = (b - a) / n;
@@ -518,10 +521,131 @@ function metodoTrapecio(fExpr, a, b, n) {
 }
 
 // ============================================
+// REGLA DEL RECTÁNGULO (MEDIO)
+// ============================================
+function metodoRectangulo(fExpr, a, b, n) {
+  const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
+  if (n < 1) return { error: true, message: 'n debe ser al menos 1.' };
+
+  const h = (b - a) / n;
+  const historial = [];
+  let suma = 0;
+
+  for (let i = 0; i < n; i++) {
+    // midpoint of subinterval [a + i*h, a + (i+1)*h]
+    const xi = a + (i + 0.5) * h;
+    const fxi = f(xi);
+    const aporte = fxi * h;
+    suma += fxi;
+    historial.push({ i, xi, fxi, aporte });
+  }
+
+  const integral = h * suma;
+
+  // Graph data
+  const graphPoints = [];
+  const steps = 200;
+  for (let s = 0; s <= steps; s++) {
+    const xv = a + (b - a) * s / steps;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  // Rectangle sample points (for visualizing midpoints)
+  const rectPoints = [];
+  for (let i = 0; i < n; i++) {
+    rectPoints.push({ x: a + (i + 0.5) * h, y: f(a + (i + 0.5) * h) });
+  }
+
+  const gaussRef = gaussLegendre5(f, a, b);
+  const errorVsGauss = Math.abs(integral - gaussRef);
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    metodoIntegracion: 'Rectángulo (Medio)',
+    integral,
+    gaussLegendre: gaussRef,
+    errorVsGauss,
+    h,
+    n,
+    a, b,
+    historial,
+    graphPoints,
+    rectPoints,
+    columns: ['i', 'x_i(mid)', 'f(x_i)', 'Aporte'],
+    getRow: (h) => [h.i, h.xi, h.fxi, h.aporte]
+  };
+}
+
+// ============================================
+// REGLA DEL RECTÁNGULO (IZQUIERDO)
+// ============================================
+function metodoRectanguloIzquierdo(fExpr, a, b, n) {
+  const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
+  if (n < 1) return { error: true, message: 'n debe ser al menos 1.' };
+
+  const h = (b - a) / n;
+  const historial = [];
+  let suma = 0;
+
+  for (let i = 0; i < n; i++) {
+    // left endpoint of subinterval [a + i*h, a + (i+1)*h]
+    const xi = a + i * h;
+    const fxi = f(xi);
+    const aporte = fxi * h;
+    suma += fxi;
+    historial.push({ i, xi, fxi, aporte });
+  }
+
+  const integral = h * suma;
+
+  const graphPoints = [];
+  const steps = 200;
+  for (let s = 0; s <= steps; s++) {
+    const xv = a + (b - a) * s / steps;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  const leftPoints = [];
+  for (let i = 0; i < n; i++) {
+    leftPoints.push({ x: a + i * h, y: f(a + i * h) });
+  }
+
+  const gaussRef = gaussLegendre5(f, a, b);
+  const errorVsGauss = Math.abs(integral - gaussRef);
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    metodoIntegracion: 'Rectángulo (Izquierdo)',
+    integral,
+    gaussLegendre: gaussRef,
+    errorVsGauss,
+    h,
+    n,
+    a, b,
+    historial,
+    graphPoints,
+    leftPoints,
+    columns: ['i', 'x_i(left)', 'f(x_i)', 'Aporte'],
+    getRow: (h) => [h.i, h.xi, h.fxi, h.aporte]
+  };
+}
+
+// ============================================
 // 7. MÉTODO DE SIMPSON 1/3
 // ============================================
 function metodoSimpson13(fExpr, a, b, n) {
   const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
   if (n < 2) return { error: true, message: 'n debe ser al menos 2.' };
   if (n % 2 !== 0) return { error: true, message: 'n debe ser par para Simpson 1/3.' };
 
@@ -579,11 +703,74 @@ function metodoSimpson13(fExpr, a, b, n) {
   };
 }
 
+function metodoSimpson38(fExpr, a, b, n) {
+  const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
+  if (n < 3) return { error: true, message: 'n debe ser al menos 3 para Simpson 3/8.' };
+  if (n % 3 !== 0) return { error: true, message: 'n debe ser múltiplo de 3 para Simpson 3/8.' };
+
+  const h = (b - a) / n;
+  const historial = [];
+  let suma = 0;
+
+  for (let i = 0; i <= n; i++) {
+    const xi = a + i * h;
+    const fxi = f(xi);
+    let coef;
+    if (i === 0 || i === n) coef = 1;
+    else if (i % 3 === 0) coef = 2;
+    else coef = 3;
+    const aporte = coef * fxi;
+    suma += aporte;
+    historial.push({ i, xi, fxi, coef, aporte });
+  }
+
+  const integral = (3 * h / 8) * suma;
+
+  const graphPoints = [];
+  const steps = 200;
+  for (let s = 0; s <= steps; s++) {
+    const xv = a + (b - a) * s / steps;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  const trapVertices = [];
+  for (let i = 0; i <= n; i++) {
+    trapVertices.push({ x: a + i * h, y: f(a + i * h) });
+  }
+
+  const gaussRef = gaussLegendre5(f, a, b);
+  const errorVsGauss = Math.abs(integral - gaussRef);
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    metodoIntegracion: 'Simpson 3/8',
+    integral,
+    gaussLegendre: gaussRef,
+    errorVsGauss,
+    h,
+    n,
+    a, b,
+    historial,
+    graphPoints,
+    trapVertices,
+    columns: ['i', 'x_i', 'f(x_i)', 'Coef.', 'Aporte'],
+    getRow: (h) => [h.i, h.xi, h.fxi, h.coef, h.aporte]
+  };
+}
+
 // ============================================
 // MÉTODO DE MONTE CARLO
 // ============================================
 function metodoMonteCarloIntegracion(fExpr, a, b, nMuestras) {
   const f = parseMathExpr(fExpr);
+
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
 
   if (a >= b) {
     return { error: true, message: 'a debe ser menor que b' };
@@ -1348,22 +1535,39 @@ const METHODS = {
     description: 'Aproxima la integral usando trapecios entre subintervalos.',
     fields: [
       { id: 'f_expr', label: 'Función f(x)', placeholder: 'x^2', hint: 'Función a integrar', fullWidth: true },
-      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'number' },
-      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
+      { id: 'trap_mode', label: 'Variante de Trapecio', type: 'dropdown', options: [{ value: 'trap', label: 'Trapecio (default)' }, { value: 'rect_mid', label: 'Rectángulo (medio)' }, { value: 'rect_left', label: 'Rectángulo (izquierdo)' }], defaultValue: 'trap', fullWidth: true },
+      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
+      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
       { id: 'n', label: 'Subintervalos (n)', placeholder: '4', type: 'number' },
     ],
-    run: (v) => metodoTrapecio(v.f_expr, parseFloat(v.a), parseFloat(v.b), parseInt(v.n))
+    run: (v) => {
+      const mode = v.trap_mode || 'trap';
+      if (mode === 'rect_mid') {
+        return metodoRectangulo(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+      }
+      if (mode === 'rect_left') {
+        return metodoRectanguloIzquierdo(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+      }
+      return metodoTrapecio(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+    }
   },
   simpson: {
     name: 'Simpson 1/3',
     description: 'Aproxima la integral con parábolas (n debe ser par).',
     fields: [
       { id: 'f_expr', label: 'Función f(x)', placeholder: 'x^2', hint: 'Función a integrar', fullWidth: true },
-      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'number' },
-      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
-      { id: 'n', label: 'Subintervalos (n, par)', placeholder: '4', type: 'number' },
+      { id: 'simpson_mode', label: 'Variante de Simpson', type: 'dropdown', options: [{ value: '13', label: 'Simpson 1/3' }, { value: '38', label: 'Simpson 3/8' }], defaultValue: '13', fullWidth: true },
+      { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
+      { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
+      { id: 'n', label: 'Subintervalos (n)', placeholder: '4 (par) o 6 (múltiplo de 3)', type: 'number' },
     ],
-    run: (v) => metodoSimpson13(v.f_expr, parseFloat(v.a), parseFloat(v.b), parseInt(v.n))
+    run: (v) => {
+      const mode = v.simpson_mode || '13';
+      if (mode === '38') {
+        return metodoSimpson38(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+      }
+      return metodoSimpson13(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+    }
   },
   monte_carlo: {
     name: 'Monte Carlo - Integración',
@@ -1374,7 +1578,7 @@ const METHODS = {
       { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
       { id: 'n_muestras', label: 'Número de muestras', placeholder: '10000', type: 'number' },
     ],
-    run: (v) => metodoMonteCarloIntegracion(v.f_expr, parseFloat(v.a), parseFloat(v.b), parseInt(v.n_muestras))
+    run: (v) => metodoMonteCarloIntegracion(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n_muestras))
   },
   monte_carlo_ic: {
     name: 'Monte Carlo - IC',
@@ -1614,11 +1818,25 @@ function renderForm(key, method) {
   method.fields.forEach(field => {
     const group = document.createElement('div');
     group.className = `form-group${field.fullWidth ? ' full-width' : ''}`;
-    group.innerHTML = `
-      <label for="field-${field.id}">${field.label}</label>
-      <input type="${field.type || 'text'}" id="field-${field.id}" placeholder="${field.placeholder}" step="any">
-      ${field.hint ? `<span class="input-hint">${field.hint}</span>` : ''}
-    `;
+
+    if (field.type === 'dropdown') {
+      const options = field.options || [];
+      const defaultValue = field.defaultValue || options[0]?.value || '';
+      const optionsHtml = options.map(opt => `<option value="${opt.value}" ${opt.value === defaultValue ? 'selected' : ''}>${opt.label}</option>`).join('');
+      group.innerHTML = `
+        <label for="field-${field.id}">${field.label}</label>
+        <select id="field-${field.id}" class="form-select">
+          ${optionsHtml}
+        </select>
+      `;
+    } else {
+      group.innerHTML = `
+        <label for="field-${field.id}">${field.label}</label>
+        <input type="${field.type || 'text'}" id="field-${field.id}" placeholder="${field.placeholder}" step="any">
+        ${field.hint ? `<span class="input-hint">${field.hint}</span>` : ''}
+      `;
+    }
+
     grid.appendChild(group);
 
     // Attach calculator to function expression fields

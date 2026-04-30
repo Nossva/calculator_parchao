@@ -1042,3 +1042,54 @@ body {
 .calc-btn.const:hover {
   background: rgba(52, 211, 153, 0.18);
 }
+
+/* ===================================================
+   DROPDOWN SELECT STYLES - Premium Aesthetic
+   =================================================== */
+.form-select {
+  padding: 10px 14px;
+  padding-right: 36px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.form-select:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.form-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.form-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-family: 'Inter', sans-serif;
+}
+
+.form-select option:checked {
+  background: linear-gradient(#6366f1, #6366f1);
+  background-color: #6366f1;
+  color: white;
+}
+
+.form-select option:checked:focus {
+  background: linear-gradient(rgba(99, 102, 241, 0.8), rgba(99, 102, 241, 0.8));
+}
