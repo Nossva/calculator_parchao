@@ -922,9 +922,10 @@ function monteCarloConfianza(fExpr, a, b, confianza, errorMax) {
   }
   const meanP = piloto.reduce((s, v) => s + v, 0) / nPiloto;
   const varP = piloto.reduce((s, v) => s + (v - meanP) ** 2, 0) / nPiloto;
-  const sigmaP = Math.sqrt(varP) * (b - a);
+  const sigmaF = Math.sqrt(varP);           // desv. estándar de f(x)
+  const sigmaP = sigmaF * (b - a);          // desv. estándar de la integral = σ_f · (b-a)
 
-  // n = (z * sigma / errorMax)^2
+  // n = ( z · σ_f · (b-a) / errorMax )²
   const nCalculado = Math.ceil((z * sigmaP / errorMax) ** 2);
   const n = Math.max(nCalculado, 1000);
 
