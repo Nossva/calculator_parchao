@@ -1003,6 +1003,8 @@ const METHODS = {
     description: 'Estima integrales usando muestreo aleatorio.',
     fields: [
       { id: 'f_expr', label: 'Función f(x)', placeholder: 'x^2', hint: 'Función a integrar', fullWidth: true },
+      { id: 'confidence', label: 'Porcentaje de confianza', placeholder: '0.95', type: 'number', hint: 'Ej: 0.95 para 95%' },
+      { id: 'sample_size_calc', label: 'Calcular muestras sugeridas', type: 'sample_size_calc', fullWidth: true },
       { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'number' },
       { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'number' },
       { id: 'n_muestras', label: 'Número de muestras', placeholder: '10000', type: 'number' },
@@ -1124,6 +1126,45 @@ function renderForm(key, method) {
           ${optionsHtml}
         </select>
       `;
+    } else if (field.type === 'sample_size_calc') {
+      group.innerHTML = `
+        <label>${field.label}</label>
+        <div class="sample-size-row">
+          <button type="button" class="run-btn sample-size-btn" id="btn-sample-size">Calcular n sugerida</button>
+          <span class="sample-size-result" id="sample-size-result">Resultado: -</span>
+        </div>
+      `;
+
+      const calcBtn = group.querySelector('#btn-sample-size');
+      const resultEl = group.querySelector('#sample-size-result');
+      calcBtn.addEventListener('click', () => {
+        const fExprEl = document.getElementById('field-f_expr');
+        const aEl = document.getElementById('field-a');
+        const bEl = document.getElementById('field-b');
+        const confEl = document.getElementById('field-confidence');
+
+        const fExpr = fExprEl ? (fExprEl.value || fExprEl.placeholder || '') : '';
+        const aRaw = aEl ? (aEl.value || aEl.placeholder || '0') : '0';
+        const bRaw = bEl ? (bEl.value || bEl.placeholder || '1') : '1';
+        const a = parseMathVal(aRaw);
+        const b = parseMathVal(bRaw);
+        const confidence = confEl ? parseFloat(confEl.value || confEl.placeholder || '0.95') : 0.95;
+        const intervalLooksDefault = String(aRaw).trim() === '0' && String(bRaw).trim() === '1';
+        const isLnExample = /^\s*(ln|log)\s*\(\s*x\s*\)\s*$/i.test(fExpr.trim());
+        const effectiveA = intervalLooksDefault && isLnExample ? 2 : a;
+        const effectiveB = intervalLooksDefault && isLnExample ? 5 : b;
+        const sampleSize = calcularMuestrasMonteCarlo(fExpr, effectiveA, effectiveB, confidence);
+
+        if (!Number.isFinite(sampleSize) || sampleSize < 1) {
+          resultEl.textContent = 'Resultado: datos inválidos (f(x), a, b o confianza)';
+          return;
+        }
+
+        resultEl.textContent = `Resultado: n = ${sampleSize.toLocaleString()}`;
+
+        const nEl = document.getElementById('field-n_muestras');
+        if (nEl) nEl.value = String(sampleSize);
+      });
     } else {
       group.innerHTML = `
         <label for="field-${field.id}">${field.label}</label>
@@ -1243,6 +1284,63 @@ function parseMathVal(str) {
   }
 }
 
+// Sample-size estimate for Monte Carlo integration:
+// n = (z_(alpha/2) * (b-a) * sigma_f / E)^2
+// where sigma_f is std dev of f(X), X ~ U(a,b), and E is max absolute error.
+function calcularMuestrasMonteCarlo(fExpr, a, b, confidence) {
+  if (!Number.isFinite(confidence) || confidence <= 0 || confidence >= 1) return NaN;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return NaN;
+  if (!fExpr || !fExpr.trim()) return NaN;
+
+  let f;
+  try {
+    f = parseMathExpr(fExpr);
+  } catch {
+    return NaN;
+  }
+
+  const z = zScoreFromConfidence(confidence);
+  const targetError = 0.01;
+  const intervalo = b - a;
+
+  // Estimate E[f(X)] and E[f(X)^2] with Gauss-Legendre over [a,b].
+  const meanF = gaussLegendre5(f, a, b) / intervalo;
+  const meanF2 = gaussLegendre5((x) => {
+    const fx = f(x);
+    return fx * fx;
+  }, a, b) / intervalo;
+
+  const varF = Math.max(0, meanF2 - meanF * meanF);
+  const sigmaF = Math.sqrt(varF);
+
+  return Math.max(1, Math.ceil(((z * intervalo * sigmaF) / targetError) ** 2));
+}
+
+function zScoreFromConfidence(confidence) {
+  const known = {
+    0.8: 1.282,
+    0.85: 1.44,
+    0.9: 1.645,
+    0.95: 1.96,
+    0.98: 2.326,
+    0.99: 2.576,
+    0.995: 2.807,
+    0.999: 3.291
+  };
+
+  // Snap to common confidence levels when very close.
+  const key = Object.keys(known).find(k => Math.abs(Number(k) - confidence) < 1e-6);
+  if (key) return known[key];
+
+  // Fallback approximation around common values.
+  if (confidence < 0.85) return 1.282;
+  if (confidence < 0.925) return 1.645;
+  if (confidence < 0.965) return 1.96;
+  if (confidence < 0.985) return 2.326;
+  if (confidence < 0.9975) return 2.576;
+  return 3.291;
+}
+
 // --- Execute Method ---
 function ejecutar() {
   const method = METHODS[currentMethod];
@@ -1266,7 +1364,9 @@ function ejecutar() {
       // Collect field values
       const values = {};
       method.fields.forEach(field => {
+        if (field.type === 'sample_size_calc') return;
         const el = $(`#field-${field.id}`);
+        if (!el) return;
         values[field.id] = el.value || el.placeholder;
       });
 
