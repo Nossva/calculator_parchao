@@ -521,6 +521,124 @@ function metodoTrapecio(fExpr, a, b, n) {
 }
 
 // ============================================
+// REGLA DEL RECTÁNGULO (MEDIO)
+// ============================================
+function metodoRectangulo(fExpr, a, b, n) {
+  const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
+  if (n < 1) return { error: true, message: 'n debe ser al menos 1.' };
+
+  const h = (b - a) / n;
+  const historial = [];
+  let suma = 0;
+
+  for (let i = 0; i < n; i++) {
+    // midpoint of subinterval [a + i*h, a + (i+1)*h]
+    const xi = a + (i + 0.5) * h;
+    const fxi = f(xi);
+    const aporte = fxi * h;
+    suma += fxi;
+    historial.push({ i, xi, fxi, aporte });
+  }
+
+  const integral = h * suma;
+
+  // Graph data
+  const graphPoints = [];
+  const steps = 200;
+  for (let s = 0; s <= steps; s++) {
+    const xv = a + (b - a) * s / steps;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  // Rectangle sample points (for visualizing midpoints)
+  const rectPoints = [];
+  for (let i = 0; i < n; i++) {
+    rectPoints.push({ x: a + (i + 0.5) * h, y: f(a + (i + 0.5) * h) });
+  }
+
+  const gaussRef = gaussLegendre5(f, a, b);
+  const errorVsGauss = Math.abs(integral - gaussRef);
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    metodoIntegracion: 'Rectángulo (Medio)',
+    integral,
+    gaussLegendre: gaussRef,
+    errorVsGauss,
+    h,
+    n,
+    a, b,
+    historial,
+    graphPoints,
+    rectPoints,
+    columns: ['i', 'x_i(mid)', 'f(x_i)', 'Aporte'],
+    getRow: (h) => [h.i, h.xi, h.fxi, h.aporte]
+  };
+}
+
+// ============================================
+// REGLA DEL RECTÁNGULO (IZQUIERDO)
+// ============================================
+function metodoRectanguloIzquierdo(fExpr, a, b, n) {
+  const f = parseMathExpr(fExpr);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { error: true, message: 'Los límites a y b deben ser valores numéricos válidos (ej: 0, pi, pi/2).' };
+  }
+  if (n < 1) return { error: true, message: 'n debe ser al menos 1.' };
+
+  const h = (b - a) / n;
+  const historial = [];
+  let suma = 0;
+
+  for (let i = 0; i < n; i++) {
+    // left endpoint of subinterval [a + i*h, a + (i+1)*h]
+    const xi = a + i * h;
+    const fxi = f(xi);
+    const aporte = fxi * h;
+    suma += fxi;
+    historial.push({ i, xi, fxi, aporte });
+  }
+
+  const integral = h * suma;
+
+  const graphPoints = [];
+  const steps = 200;
+  for (let s = 0; s <= steps; s++) {
+    const xv = a + (b - a) * s / steps;
+    graphPoints.push({ x: xv, y: f(xv) });
+  }
+
+  const leftPoints = [];
+  for (let i = 0; i < n; i++) {
+    leftPoints.push({ x: a + i * h, y: f(a + i * h) });
+  }
+
+  const gaussRef = gaussLegendre5(f, a, b);
+  const errorVsGauss = Math.abs(integral - gaussRef);
+
+  return {
+    convergio: true,
+    isIntegration: true,
+    metodoIntegracion: 'Rectángulo (Izquierdo)',
+    integral,
+    gaussLegendre: gaussRef,
+    errorVsGauss,
+    h,
+    n,
+    a, b,
+    historial,
+    graphPoints,
+    leftPoints,
+    columns: ['i', 'x_i(left)', 'f(x_i)', 'Aporte'],
+    getRow: (h) => [h.i, h.xi, h.fxi, h.aporte]
+  };
+}
+
+// ============================================
 // 7. MÉTODO DE SIMPSON 1/3
 // ============================================
 function metodoSimpson13(fExpr, a, b, n) {
@@ -846,11 +964,21 @@ const METHODS = {
     description: 'Aproxima la integral usando trapecios entre subintervalos.',
     fields: [
       { id: 'f_expr', label: 'Función f(x)', placeholder: 'x^2', hint: 'Función a integrar', fullWidth: true },
+      { id: 'trap_mode', label: 'Variante de Trapecio', type: 'dropdown', options: [{ value: 'trap', label: 'Trapecio (default)' }, { value: 'rect_mid', label: 'Rectángulo (medio)' }, { value: 'rect_left', label: 'Rectángulo (izquierdo)' }], defaultValue: 'trap', fullWidth: true },
       { id: 'a', label: 'Límite inferior a', placeholder: '0', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
       { id: 'b', label: 'Límite superior b', placeholder: '1', type: 'text', hint: 'Acepta: pi, pi/2, 2*pi, e, sqrt(...)' },
       { id: 'n', label: 'Subintervalos (n)', placeholder: '4', type: 'number' },
     ],
-    run: (v) => metodoTrapecio(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n))
+    run: (v) => {
+      const mode = v.trap_mode || 'trap';
+      if (mode === 'rect_mid') {
+        return metodoRectangulo(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+      }
+      if (mode === 'rect_left') {
+        return metodoRectanguloIzquierdo(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+      }
+      return metodoTrapecio(v.f_expr, parseMathVal(v.a), parseMathVal(v.b), parseInt(v.n));
+    }
   },
   simpson: {
     name: 'Simpson 1/3',
